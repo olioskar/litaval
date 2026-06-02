@@ -99,7 +99,7 @@ a{color:inherit}
 .slot-main{display:flex; gap:14px; align-items:center}
 .alts{padding-top:10px; border-top:1px dashed var(--line)}
 .alts-label{display:block; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-soft); margin-bottom:8px}
-.alt-matrix{display:grid; gap:6px; justify-content:start; align-items:start}
+.alt-matrix{display:grid; gap:6px; justify-content:start; align-items:start; max-width:100%; overflow-x:auto}
 .alt-empty{width:34px; height:34px; border-radius:8px; border:1px dashed var(--line-strong); opacity:.65}
 .alt-sw{
   width:34px; height:34px; border-radius:8px; border:1px solid rgba(0,0,0,.12); padding:0; cursor:pointer;

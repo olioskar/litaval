@@ -26,7 +26,7 @@ const HARMONIES = {
     {id:'complementary', name:'Complementary', offsets:[180],
      desc:'Opposite hues — high contrast and energy.',
      why:'Hues sitting opposite on the colour wheel intensify each other, giving a vivid, confident contrast. Let one lead and the other accent.'},
-    {id:'analogous2', name:'Analogous', offsets:[30],
+    {id:'analogous2', name:'Analogous', offsets:[30], biDir:true,
      desc:'Neighbouring hues — calm and cohesive.',
      why:'Adjacent hues share underlying pigment, so they blend gently. The result feels harmonious and easy — the safest, most restful pairing.'},
     {id:'mono2', name:'Monochromatic', mono:true, steps:2,
@@ -58,6 +58,13 @@ const titleish = c => /^\d+$/.test(c.name) ? `No. ${c.name}` : c.name;
 /* signed shortest angle from b to a, in (-180,180]; positive = a is "ahead" of b on the wheel */
 const signedDelta = (a,b) => ((a-b+540)%360)-180;
 
+/* hue closeness score for a slot. Normally "closest to the centre hue is best".
+   For a bidirectional axis (idealOff set) the centre is the BASE hue, so score by how
+   far the colour is from the ideal ±offset instead — best = nearest a true neighbour. */
+const hueScore = (c, ax) => ax.idealOff != null
+  ? Math.abs(hueDist(c.h, ax.centerHue) - ax.idealOff)
+  : hueDist(c.h, ax.centerHue);
+
 /* per-harmony hue tolerance (± degrees from the ideal target before the relationship degrades).
    `minBase` keeps analogous neighbours from collapsing into the base hue. */
 const TOL = {
@@ -69,7 +76,7 @@ const TOL = {
 function qualifies(c, ax, base, others, currentHex){
   if (c.hex===base.hex && c.name===base.name) return false;
   if (c.hex!==currentHex && others.has(c.hex)) return false;
-  if (ax.valueOnly) return c.family===ax.family;
+  if (ax.valueOnly) return hueDist(c.h, ax.centerHue) <= ax.hueLimit;
   if (c.neutral) return false;
   if (c.l<12 || c.l>90) return false;                       // hue stops reading at the extremes
   if (hueDist(c.h, ax.centerHue) > ax.hueLimit) return false;
@@ -82,7 +89,7 @@ function pickBest(base, ax, used){
   let best=null, bs=1e9;
   for (const c of COLORS){
     if (!qualifies(c, ax, base, used, null)) continue;
-    const sc=(ax.valueOnly?Math.abs(c.s-base.s)*0.1:hueDist(c.h,ax.centerHue)) + Math.abs(c.l-ax.centerL)*0.3;
+    const sc=(ax.valueOnly?Math.abs(c.s-base.s)*0.1:hueScore(c,ax)) + Math.abs(c.l-ax.centerL)*0.3;
     if (sc<bs){bs=sc; best=c;}
   }
   return best;
@@ -100,10 +107,20 @@ function buildPalette(base, harmony){
       ? [[clampL(base.l>50 ? base.l-STEP : base.l+STEP), 'Shade']]
       : [[clampL(base.l+STEP),'Lighter'], [clampL(base.l-STEP),'Deeper']];
     for (const [t,role] of defs){
-      const ax={valueOnly:true, family:base.family, centerHue:base.h, centerL:t, Vval:30, rowMax:3, colMax:2, satBin:14};
+      const ax={valueOnly:true, centerHue:base.h, hueLimit:15, centerL:t, Vval:30, rowMax:3, colMax:2, satBin:14};
       const pick=pickBest(base, ax, used) || pickBestByL(base, ax, used);
       if (pick){ used.add(pick.hex); slots.push({role, color:pick, axis:ax}); }
     }
+  } else if (harmony.biDir){
+    // analogous on BOTH sides: centre the axis on the base hue so the matrix fans out to
+    // the -off and +off neighbours symmetrically (centre columns stay empty via minBase).
+    const off=harmony.offsets[0], binW=12, colMax=4;
+    // dead-zone just past half a column so ONLY the centre column (the base hue) stays empty
+    const ax={valueOnly:false, biDir:true, idealOff:off, centerHue:base.h, centerL:base.l,
+              binW, hueLimit:(colMax+0.5)*binW, minBase:binW/2+1,
+              Vval:30, rowMax:2, colMax};
+    const pick=pickBest(base, ax, used);
+    if (pick){ used.add(pick.hex); slots.push({role:roleName(off), color:pick, axis:ax}); }
   } else {
     const tol = TOL[harmony.id] || {h:18};
     const colMax=3, binW=tol.h/2;
@@ -117,12 +134,12 @@ function buildPalette(base, harmony){
   }
   return slots;
 }
-/* mono fallback: closest lightness in family (qualifies() valueOnly path already covers it,
-   but guard against an empty window) */
+/* mono fallback: closest lightness within the hue window (qualifies() valueOnly path already
+   covers it, but guard against an empty window) */
 function pickBestByL(base, ax, used){
   let best=null,bd=1e9;
   for(const c of COLORS){
-    if(c.family!==ax.family || used.has(c.hex) || (c.hex===base.hex&&c.name===base.name)) continue;
+    if(hueDist(c.h, ax.centerHue) > ax.hueLimit || used.has(c.hex) || (c.hex===base.hex&&c.name===base.name)) continue;
     const d=Math.abs(c.l-ax.centerL); if(d<bd){bd=d;best=c;}
   }
   return best;
@@ -146,7 +163,7 @@ function buildMatrix(s, i){
     const dl=c.l-ax.centerL;
     const row=clamp(Math.round(dl/rowBin), -ax.rowMax, ax.rowMax);
     const key=col+','+row;
-    const score=(ax.valueOnly?Math.abs(c.s-base.s)*0.1:hueDist(c.h,ax.centerHue)) + Math.abs(dl)*0.3;
+    const score=(ax.valueOnly?Math.abs(c.s-base.s)*0.1:hueScore(c,ax)) + Math.abs(dl)*0.3;
     const ex=cells.get(key);
     if (!ex || score<ex.score) cells.set(key, {c, score});
   }
@@ -279,6 +296,8 @@ function renderResult(){
       <div class="alts">
         <span class="alts-label">${s.axis.valueOnly
           ? 'Centre = best · lighter ↑ / darker ↓ · muted ← / vivid → · tap to swap'
+          : s.axis.biDir
+          ? 'Your base hue sits centre · analogous neighbours either side ←→ · value ↑ / ↓ · tap to swap'
           : 'Centre = best match · hue ←→ · value (lighter ↑ / darker ↓) · tap to swap'}</span>
         ${renderMatrix(s, i)}
       </div>` : '';
