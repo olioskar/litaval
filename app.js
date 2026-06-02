@@ -218,7 +218,7 @@ function renderHarmonies(){
   grid.innerHTML = HARMONIES[state.count].map(h=>`
     <button class="harmony-card ${h.id===state.harmony.id?'is-active':''}" data-id="${h.id}">
       ${wheelSVG(h)}
-      <span><span class="h-name">${h.name}</span><span class="h-desc">${h.desc}</span></span>
+      <span class="h-text"><span class="h-name">${h.name}</span><span class="h-desc">${h.desc}</span></span>
     </button>`).join('');
   grid.querySelectorAll('.harmony-card').forEach(b=>b.onclick=()=>{
     state.harmony = HARMONIES[state.count].find(x=>x.id===b.dataset.id);
@@ -257,12 +257,11 @@ function renderGrid(){
   const grid=document.getElementById('swatchGrid');
   const list=filteredColors();
   document.getElementById('gridCount').textContent=`${list.length} shown`;
-  const cap=900; // keep DOM sane
-  grid.innerHTML=list.slice(0,cap).map(c=>{
+  grid.innerHTML=list.map(c=>{
     return `<button class="swatch ${state.base&&state.base.hex===c.hex&&state.base.name===c.name?'is-base':''}"
       style="background-color:${c.hex}" data-hex="${c.hex}" data-name="${encodeURIComponent(c.name)}" title="">
       <span class="tip">${titleish(c)} · ${c.hex}</span></button>`;
-  }).join('') + (list.length>cap?`<div class="empty-hint">+${list.length-cap} more — narrow with search or filters.</div>`:'')
+  }).join('')
     + (list.length===0?`<div class="empty-hint">No colours match. Try clearing filters.</div>`:'');
   grid.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>{
     const nm=decodeURIComponent(b.dataset.name);
