@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Litaval — Serefni colour pairing tool</title>
 <link rel="preconnect" href="https://serefni.is">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
 
@@ -59,15 +59,26 @@
     <div class="step"><span class="num">3</span><h2>Your palette</h2></div>
     <div class="palette-tray" id="paletteTray"><!-- slots injected --></div>
 
-    <div class="neutral-picker" id="neutralPicker" hidden>
-      <div class="np-head">
-        <h3>Swap in a neutral</h3>
-        <div class="seg np-target" id="neutralTarget" role="tablist" aria-label="Palette slot to replace"><!-- slot tabs injected --></div>
+    <details class="neutral-picker" id="neutralPicker" hidden>
+      <summary class="np-summary"><span>Swap in a neutral</span><span class="np-chevron" aria-hidden="true"></span></summary>
+      <div class="np-body">
+        <div class="np-head">
+          <span class="np-target-label">Replace</span>
+          <div class="seg np-target" id="neutralTarget" role="tablist" aria-label="Palette slot to replace"><!-- slot tabs injected --></div>
+        </div>
+        <p class="hint">Neutrals work alongside any scheme. Pick the slot to replace, then tap a neutral to drop it in.</p>
+        <div class="family-chips np-fams" id="neutralFams"><!-- chips injected --></div>
+        <div class="swatch-grid np-grid" id="neutralGrid"><!-- neutral swatches injected --></div>
       </div>
-      <p class="hint">Neutrals work alongside any scheme. Pick the slot to replace, then tap a neutral to drop it in.</p>
-      <div class="family-chips np-fams" id="neutralFams"><!-- chips injected --></div>
-      <div class="swatch-grid np-grid" id="neutralGrid"><!-- neutral swatches injected --></div>
-    </div>
+    </details>
+  </section>
+
+  <!-- OPTIONAL: analyse your own colours -->
+  <section class="panel analyze-panel" id="analyzePanel">
+    <div class="step"><h2>Analyse your own colours</h2></div>
+    <p class="hint">Pick two or three Sérefni colours and see which colour-theory relationship they form — and how far they sit from the textbook ideal. Your selection drives the preview below.</p>
+    <div class="analyze-slots" id="analyzeSlots"><!-- search-selects injected --></div>
+    <div class="analyze-result" id="analyzeResult" hidden><!-- readout injected --></div>
   </section>
 
   <!-- STEP 4: preview the harmony in proportion -->
@@ -95,7 +106,7 @@
   <p>Colours scraped from <a href="https://serefni.is/litir/" target="_blank" rel="noopener">serefni.is/litir</a>. This is an independent exploration tool — swatches are screen approximations; always confirm with a physical sample. Hex values come straight from Sérefni's site.</p>
 </footer>
 
-<script src="colors.js"></script>
-<script src="app.js"></script>
+<script src="colors.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

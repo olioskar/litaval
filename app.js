@@ -54,9 +54,12 @@ const hueDist = (a,b) => {const d=Math.abs(a-b)%360; return d>180?360-d:d;};
 const norm = h => ((h%360)+360)%360;
 const clamp = (v,lo,hi) => Math.max(lo, Math.min(hi, v));
 const titleish = c => /^\d+$/.test(c.name) ? `No. ${c.name}` : c.name;
-
-/* signed shortest angle from b to a, in (-180,180]; positive = a is "ahead" of b on the wheel */
-const signedDelta = (a,b) => ((a-b+540)%360)-180;
+const matchesQuery = (c,q) => c.name.toLowerCase().includes(q)
+  || (c.collection||'').toLowerCase().includes(q)
+  || (c.aka||[]).some(a=>a.toLowerCase().includes(q));
+const akaLine = c => (c.aka&&c.aka.length) ? c.aka.join(' · ') : '';
+const escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+const tipFor = c => `${titleish(c)} · ${c.hex}${akaLine(c)?` · aka ${akaLine(c)}`:''}`;
 
 /* hue closeness score for a slot. Normally "closest to the centre hue is best".
    For a bidirectional axis (idealOff set) the centre is the BASE hue, so score by how
@@ -76,7 +79,11 @@ const TOL = {
 function qualifies(c, ax, base, others, currentHex){
   if (c.hex===base.hex && c.name===base.name) return false;
   if (c.hex!==currentHex && others.has(c.hex)) return false;
-  if (ax.valueOnly) return hueDist(c.h, ax.centerHue) <= ax.hueLimit;
+  if (ax.valueOnly){
+    if (hueDist(c.h, ax.centerHue) > ax.hueLimit) return false;
+    if (ax.dir && (c.l - base.l) * ax.dir <= 0) return false;   // tints/shades stay on their side
+    return true;
+  }
   if (c.neutral) return false;
   if (c.l<12 || c.l>90) return false;                       // hue stops reading at the extremes
   if (hueDist(c.h, ax.centerHue) > ax.hueLimit) return false;
@@ -84,12 +91,17 @@ function qualifies(c, ax, base, others, currentHex){
   return true;
 }
 
-/* best (closest to centre) qualifying colour — used as the default pick */
+/* best (textbook) qualifying colour — used as the default pick.
+   For hue harmonies, hue distance to the ideal target dominates so the default lands as
+   close to the textbook example as possible; lightness is only a fine tiebreak among hue-ties.
+   For mono (valueOnly) the textbook pick is the target lightness, so lightness dominates. */
 function pickBest(base, ax, used){
   let best=null, bs=1e9;
   for (const c of COLORS){
     if (!qualifies(c, ax, base, used, null)) continue;
-    const sc=(ax.valueOnly?Math.abs(c.s-base.s)*0.1:hueScore(c,ax)) + Math.abs(c.l-ax.centerL)*0.3;
+    const sc = ax.valueOnly
+      ? Math.abs(c.l-ax.centerL) + Math.abs(c.s-base.s)*0.1
+      : hueScore(c,ax) + Math.abs(c.l-ax.centerL)*0.02;
     if (sc<bs){bs=sc; best=c;}
   }
   return best;
@@ -103,33 +115,34 @@ function buildPalette(base, harmony){
     // shade targets are a relative step from the base lightness (not a fixed extreme),
     // clamped to a readable range so the contrast scales with how light/dark the base is
     const STEP=30, clampL=v=>clamp(v,18,86);
+    // dir keeps each slot's tints/shades on its own side of the base lightness
     const defs = harmony.steps===2
-      ? [[clampL(base.l>50 ? base.l-STEP : base.l+STEP), 'Shade']]
-      : [[clampL(base.l+STEP),'Lighter'], [clampL(base.l-STEP),'Deeper']];
-    for (const [t,role] of defs){
-      const ax={valueOnly:true, centerHue:base.h, hueLimit:22, centerL:t, Vval:30, rowMax:3, colMax:2, satBin:14};
+      ? [[clampL(base.l>50 ? base.l-STEP : base.l+STEP), 'Shade', base.l>50?-1:1]]
+      : [[clampL(base.l+STEP),'Lighter',1], [clampL(base.l-STEP),'Deeper',-1]];
+    for (const [t,role,dir] of defs){
+      const ax={valueOnly:true, dir, centerHue:base.h, hueLimit:12, centerL:t, Vval:30, rowMax:3, colMax:2, satBin:14};
       const pick=pickBest(base, ax, used) || pickBestByL(base, ax, used);
-      if (pick){ used.add(pick.hex); slots.push({role, color:pick, axis:ax}); }
+      if (pick){ used.add(pick.hex); slots.push({role, color:pick, best:pick, axis:ax}); }
     }
   } else if (harmony.biDir){
     // analogous on BOTH sides: centre the axis on the base hue so the matrix fans out to
     // the -off and +off neighbours symmetrically (centre columns stay empty via minBase).
-    const off=harmony.offsets[0], binW=16, colMax=4;
+    const off=harmony.offsets[0], binW=16, colMax=3;
     // dead-zone just past half a column so ONLY the centre column (the base hue) stays empty
     const ax={valueOnly:false, biDir:true, idealOff:off, centerHue:base.h, centerL:base.l,
               binW, hueLimit:(colMax+0.5)*binW, minBase:binW/2+1,
               Vval:30, rowMax:2, colMax};
     const pick=pickBest(base, ax, used);
-    if (pick){ used.add(pick.hex); slots.push({role:roleName(off), color:pick, axis:ax}); }
+    if (pick){ used.add(pick.hex); slots.push({role:roleName(off), color:pick, best:pick, axis:ax}); }
   } else {
     const tol = TOL[harmony.id] || {h:18};
-    const colMax=3, binW=tol.h/2;
+    const colMax=2, binW=tol.h/2;
     harmony.offsets.forEach(off=>{
       const ax={valueOnly:false, centerHue:norm(base.h+off), centerL:base.l,
                 binW, hueLimit:(colMax+0.5)*binW, minBase:tol.minBase||0,
                 Vval:30, rowMax:2, colMax};
       const pick=pickBest(base, ax, used);
-      if (pick){ used.add(pick.hex); slots.push({role:roleName(off), color:pick, axis:ax}); }
+      if (pick){ used.add(pick.hex); slots.push({role:roleName(off), color:pick, best:pick, axis:ax}); }
     });
   }
   return slots;
@@ -140,51 +153,43 @@ function pickBestByL(base, ax, used){
   let best=null,bd=1e9;
   for(const c of COLORS){
     if(hueDist(c.h, ax.centerHue) > ax.hueLimit || used.has(c.hex) || (c.hex===base.hex&&c.name===base.name)) continue;
+    if(ax.dir && (c.l - base.l) * ax.dir <= 0) continue;
     const d=Math.abs(c.l-ax.centerL); if(d<bd){bd=d;best=c;}
   }
   return best;
 }
 
-/* bin every qualifying colour into a (col,row) cell; keep the best representative per cell */
-function buildMatrix(s, i){
+/* every qualifying alternative for this slot, grouped by hue (closest-to-ideal group first)
+   and ramped light→dark within each hue group, so the grid reads like a gradient.
+   mono axes have ~constant hue, so they collapse to a pure lightness ramp. */
+function buildAltList(s, i){
   const ax=s.axis, base=state.base;
   const others=new Set(state.palette.filter((_,k)=>k!==i).map(x=>x.color.hex));
-  const cells=new Map();
-  const rowBin=ax.Vval/ax.rowMax;
+  const list=[];
   for (const c of COLORS){
     if (!qualifies(c, ax, base, others, s.color.hex)) continue;
-    let col=0;
-    if (ax.valueOnly){
-      col=clamp(Math.round((c.s-base.s)/ax.satBin), -ax.colMax, ax.colMax);
-    } else {
-      const dh=signedDelta(c.h, ax.centerHue);
-      col=clamp(Math.round(dh/ax.binW), -ax.colMax, ax.colMax);
-    }
-    const dl=c.l-ax.centerL;
-    const row=clamp(Math.round(dl/rowBin), -ax.rowMax, ax.rowMax);
-    const key=col+','+row;
-    const score=(ax.valueOnly?Math.abs(c.s-base.s)*0.1:hueScore(c,ax)) + Math.abs(dl)*0.3;
-    const ex=cells.get(key);
-    if (!ex || score<ex.score) cells.set(key, {c, score});
+    list.push(c);
   }
-  return cells;
+  const binW=ax.binW||12;
+  const hueBin=c=> ax.valueOnly ? 0 : Math.round(hueScore(c, ax)/binW);
+  list.sort((a,b)=>{
+    const ka=hueBin(a), kb=hueBin(b);
+    if (ka!==kb) return ka-kb;     // closest-hue group leads
+    return b.l - a.l;              // lightest → darkest within a hue group
+  });
+  return list;
 }
-function renderMatrix(s, i){
-  const ax=s.axis, cells=buildMatrix(s, i);
-  const cols=[]; for(let x=-ax.colMax;x<=ax.colMax;x++) cols.push(x);
-  const rows=[]; for(let y=ax.rowMax;y>=-ax.rowMax;y--) rows.push(y);
-  let h=`<div class="alt-matrix${ax.valueOnly?' value-only':''}" style="grid-template-columns:repeat(${cols.length},34px)">`;
-  for (const y of rows) for (const x of cols){
-    const cell=cells.get(x+','+y);
-    if (cell){
-      const c=cell.c;
-      const sel=(c.hex===s.color.hex && c.name===s.color.name)?' is-sel':'';
-      const ctr=(x===0 && y===0)?' is-center':'';
-      h+=`<button class="alt-sw${sel}${ctr}" data-slot="${i}" data-hex="${c.hex}" data-an="${encodeURIComponent(c.name)}"
-            style="background-color:${c.hex}" title="${titleish(c)} · ${c.hex}"></button>`;
-    } else h+=`<span class="alt-empty"></span>`;
-  }
-  return h+`</div>`;
+function renderAltGrid(s, i){
+  const list=buildAltList(s, i), cur=s.color, best=s.best;
+  const cells=list.map(c=>{
+    const sel=(c.hex===cur.hex && c.name===cur.name)?' is-sel':'';
+    const isBest=(best && c.hex===best.hex && c.name===best.name)?' is-best':'';
+    const tip=isBest ? `${tipFor(c)} · best match` : tipFor(c);
+    return `<button class="swatch${sel}${isBest}" data-slot="${i}" data-hex="${c.hex}"
+      data-name="${encodeURIComponent(c.name)}" data-tip="${escAttr(tip)}"
+      style="background-color:${c.hex}"></button>`;
+  }).join('');
+  return `<div class="swatch-grid alt-grid">${cells||`<div class="empty-hint">No alternatives in range.</div>`}</div>`;
 }
 function roleName(off){
   const a=norm(off);
@@ -197,7 +202,56 @@ function roleName(off){
 
 /* ---------- state ---------- */
 const state = {count:2, harmony:HARMONIES[2][0], base:null, filterFamily:'All', muted:false, search:'',
-               palette:[], ratios:[], activeSlot:1, neutralFam:'All'};
+               palette:[], ratios:[], activeSlot:1, neutralFam:'All', analyze:[null,null,null]};
+
+/* ---------- reverse analysis: classify an arbitrary 2–3 colour set ---------- */
+// templates are hue offsets (deg) from a chosen base; the classifier tries each
+// colour as base and the best partner assignment, then reports the smallest drift.
+const SCHEME_TEMPLATES = {
+  2: [
+    {id:'mono', name:'Monochromatic', offsets:[0]},
+    {id:'analogous', name:'Analogous', offsets:[30]},
+    {id:'split', name:'Split-complementary', offsets:[150]},
+    {id:'complementary', name:'Complementary', offsets:[180]},
+    {id:'triadic', name:'Triadic', offsets:[120]},
+  ],
+  3: [
+    {id:'mono', name:'Monochromatic', offsets:[0,0]},
+    {id:'analogous', name:'Analogous', offsets:[-30,30]},
+    {id:'triadic', name:'Triadic', offsets:[120,240]},
+    {id:'split', name:'Split-complementary', offsets:[150,210]},
+  ],
+};
+function classifyScheme(cols){
+  const n=cols.length, tmpls=SCHEME_TEMPLATES[n];
+  if(!tmpls) return null;
+  let best=null;
+  for(let b=0;b<n;b++){
+    const others=cols.filter((_,k)=>k!==b);
+    const actual=others.map(c=>norm(c.h-cols[b].h));
+    const perms = n===3 ? [[0,1],[1,0]] : [[0]];
+    for(const t of tmpls){
+      for(const perm of perms){
+        const drifts=t.offsets.map((o,k)=>hueDist(actual[perm[k]], norm(o)));
+        const avg=drifts.reduce((a,d)=>a+d,0)/drifts.length, max=Math.max(...drifts);
+        if(!best || avg<best.avg) best={scheme:t, baseIndex:b, perm, drifts, avg, max};
+      }
+    }
+  }
+  return best;
+}
+function driftTier(d){
+  if(d<8)  return {label:'textbook',       note:'almost exactly the textbook relationship'};
+  if(d<18) return {label:'close',          note:'a close, clearly recognisable match'};
+  if(d<32) return {label:'loose',          note:'a loose interpretation of the rule'};
+  return       {label:'unconventional', note:'only loosely related — an unconventional pairing'};
+}
+function analyzeColors(){ return state.analyze.filter(Boolean); }
+function analyzeActive(){ return analyzeColors().length>=2; }
+/* the colour set currently driving the preview band + why panel */
+function previewColors(){
+  return analyzeActive() ? analyzeColors() : state.palette.map(s=>s.color);
+}
 
 /* neutrals (White / Warm Neutral / Cool Neutral) — browsable any time to swap into a slot.
    Sorted by family group, then light → dark for a readable ramp. */
@@ -255,7 +309,7 @@ function filteredColors(){
   return COLORS.filter(c=>{
     if(state.filterFamily!=='All' && c.family!==state.filterFamily) return false;
     if(state.muted && !c.muted) return false;
-    if(q && !c.name.toLowerCase().includes(q) && !(c.collection||'').toLowerCase().includes(q)) return false;
+    if(q && !matchesQuery(c,q)) return false;
     return true;
   });
 }
@@ -265,8 +319,8 @@ function renderGrid(){
   document.getElementById('gridCount').textContent=`${list.length} shown`;
   grid.innerHTML=list.map(c=>{
     return `<button class="swatch ${state.base&&state.base.hex===c.hex&&state.base.name===c.name?'is-base':''}"
-      style="background-color:${c.hex}" data-hex="${c.hex}" data-name="${encodeURIComponent(c.name)}" title="">
-      <span class="tip">${titleish(c)} · ${c.hex}</span></button>`;
+      style="background-color:${c.hex}" data-hex="${c.hex}" data-name="${encodeURIComponent(c.name)}"
+      data-tip="${escAttr(tipFor(c))}"></button>`;
   }).join('')
     + (list.length===0?`<div class="empty-hint">No colours match. Try clearing filters.</div>`:'');
   grid.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>{
@@ -281,8 +335,8 @@ function renderGrid(){
 function recompute(){
   if(!state.base){return;}
   state.palette=buildPalette(state.base, state.harmony);
-  state.ratios=evenRatios(state.palette.length);
-  renderResult(); renderWhy(); renderRatio(); renderNeutralPicker();
+  state.ratios=evenRatios(previewColors().length);
+  renderResult(); renderWhy(); renderRatio(); renderNeutralPicker(); renderAnalyze();
   document.getElementById('resultPanel').hidden=false;
   document.getElementById('whySection').hidden=false;
   document.getElementById('ratioSection').hidden=false;
@@ -295,16 +349,13 @@ function renderResult(){
     const c=s.color, e=emo(c);
     const tags=[e.temp, ...(e.words||[]).slice(0,2), c.muted?'muted':null].filter(Boolean)
       .map(t=>`<span class="tag">${t}</span>`).join('');
-    // alternatives, arranged as a tolerance matrix: centre = best match,
-    // columns shift hue ←→, rows shift value (lighter ↑ / darker ↓)
+    // alternatives that fit this slot's harmony rule, sorted best-first; tap to swap
     const altBlock = s.axis ? `
       <div class="alts">
         <span class="alts-label">${s.axis.valueOnly
-          ? 'Centre = best · lighter ↑ / darker ↓ · muted ← / vivid → · tap to swap'
-          : s.axis.biDir
-          ? 'Your base hue sits centre · analogous neighbours either side ←→ · value ↑ / ↓ · tap to swap'
-          : 'Centre = best match · hue ←→ · value (lighter ↑ / darker ↓) · tap to swap'}</span>
-        ${renderMatrix(s, i)}
+          ? 'Tints & shades that fit — light to dark · tap to swap'
+          : 'Alternatives that fit this harmony — grouped by hue · tap to swap'}</span>
+        ${renderAltGrid(s, i)}
       </div>` : '';
     const wide = (i===0 || state.palette.length===2) ? ' wide' : '';
     return `<div class="slot${wide}">
@@ -314,6 +365,7 @@ function renderResult(){
           <div class="role">${s.role}</div>
           <div class="nm">${titleish(c)}</div>
           <div class="sub">${c.hex} · ${c.family}${c.collection?` · ${c.collection}`:''}</div>
+          ${akaLine(c)?`<div class="aka">also known as ${akaLine(c)}</div>`:''}
           <div class="tags">${tags}</div>
         </div>
         <div class="acts">
@@ -324,8 +376,8 @@ function renderResult(){
       ${altBlock}
     </div>`;
   }).join('');
-  tray.querySelectorAll('.alt-sw').forEach(b=>b.onclick=()=>
-    selectAlt(+b.dataset.slot, b.dataset.hex, decodeURIComponent(b.dataset.an)));
+  tray.querySelectorAll('.alt-grid .swatch').forEach(b=>b.onclick=()=>
+    selectAlt(+b.dataset.slot, b.dataset.hex, decodeURIComponent(b.dataset.name)));
   tray.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{
     try{ await navigator.clipboard.writeText(b.dataset.copy); }catch(e){}
     const t=b.textContent; b.textContent='Copied ✓'; setTimeout(()=>{b.textContent=t;},1200);
@@ -334,8 +386,14 @@ function renderResult(){
 function selectAlt(i, hex, name){
   const s=state.palette[i]; if(!s.axis) return;
   const pick=COLORS.find(c=>c.hex===hex && c.name===name);
-  if(pick){ s.color=pick; renderResult(); renderWhy(); renderRatio();
-    if(i===state.activeSlot) renderNeutralGrid(); }
+  if(pick){
+    // keep each alt-grid from jumping to the top when the tray re-renders
+    const tray=document.getElementById('paletteTray');
+    const scrolls=[...tray.querySelectorAll('.alt-grid')].map(g=>g.scrollTop);
+    s.color=pick; renderResult(); renderWhy(); renderRatio();
+    [...tray.querySelectorAll('.alt-grid')].forEach((g,k)=>{ if(scrolls[k]!=null) g.scrollTop=scrolls[k]; });
+    if(i===state.activeSlot) renderNeutralGrid();
+  }
 }
 
 /* ---------- render: neutral picker (within Step 3) ---------- */
@@ -373,8 +431,8 @@ function renderNeutralGrid(){
   grid.innerHTML=list.map(c=>{
     const sel=cur && cur.hex===c.hex && cur.name===c.name ? ' is-sel' : '';
     return `<button class="swatch${sel}" style="background-color:${c.hex}"
-      data-hex="${c.hex}" data-name="${encodeURIComponent(c.name)}" title="">
-      <span class="tip">${titleish(c)} · ${c.hex}</span></button>`;
+      data-hex="${c.hex}" data-name="${encodeURIComponent(c.name)}"
+      data-tip="${escAttr(tipFor(c))}"></button>`;
   }).join('')
     + (list.length===0?`<div class="empty-hint">No neutrals in this group.</div>`:'');
   grid.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>{
@@ -387,20 +445,112 @@ function renderNeutralGrid(){
   });
 }
 
+/* ---------- render: analyse-your-own-colours ---------- */
+function renderAnalyze(){ renderAnalyzeSlots(); renderAnalyzeResult(); }
+
+function renderAnalyzeSlots(){
+  const wrap=document.getElementById('analyzeSlots');
+  wrap.innerHTML=state.analyze.map((c,i)=> c
+    ? `<div class="aslot" data-i="${i}">
+         <button class="achip" data-i="${i}" title="Remove this colour">
+           <span class="achip-sw" style="background:${c.hex}"></span>
+           <span class="achip-meta"><span class="achip-nm">${titleish(c)}</span><span class="achip-hex">${c.hex} · ${c.family}</span></span>
+           <span class="achip-x" aria-hidden="true">✕</span>
+         </button>
+       </div>`
+    : `<div class="aslot" data-i="${i}">
+         <input class="asearch" data-i="${i}" placeholder="${i<2?'Search a colour…':'Add a third (optional)…'}" autocomplete="off">
+         <div class="aresults" data-i="${i}" hidden></div>
+       </div>`).join('');
+  wrap.querySelectorAll('.asearch').forEach(inp=>{
+    inp.oninput=()=>showAnalyzeResults(+inp.dataset.i, inp.value);
+    inp.onfocus =()=>showAnalyzeResults(+inp.dataset.i, inp.value);
+    inp.onblur  =()=>setTimeout(()=>{const d=wrap.querySelector(`.aresults[data-i="${inp.dataset.i}"]`); if(d) d.hidden=true;},150);
+  });
+  wrap.querySelectorAll('.achip').forEach(b=>b.onclick=()=>{ state.analyze[+b.dataset.i]=null; afterAnalyzeChange(); });
+}
+function showAnalyzeResults(i, q){
+  const d=document.querySelector(`.aresults[data-i="${i}"]`); if(!d) return;
+  q=(q||'').trim().toLowerCase();
+  if(!q){ d.hidden=true; d.innerHTML=''; return; }
+  const chosen=new Set(analyzeColors().map(c=>c.hex+c.name));
+  const top=COLORS.filter(c=>!chosen.has(c.hex+c.name) && matchesQuery(c,q)).slice(0,10);
+  d.innerHTML = top.length ? top.map(c=>
+    `<button class="ares" data-i="${i}" data-hex="${c.hex}" data-name="${encodeURIComponent(c.name)}">
+       <span class="ares-sw" style="background:${c.hex}"></span>
+       <span class="ares-nm">${titleish(c)}</span><span class="ares-hex">${c.hex}</span>
+     </button>`).join('') : `<div class="ares-empty">No matches</div>`;
+  d.hidden=false;
+  d.querySelectorAll('.ares').forEach(b=>b.onmousedown=e=>{
+    e.preventDefault();
+    const nm=decodeURIComponent(b.dataset.name);
+    state.analyze[+b.dataset.i]=COLORS.find(c=>c.hex===b.dataset.hex && c.name===nm)||null;
+    afterAnalyzeChange();
+  });
+}
+function analyzeWheelSVG(cl, cols){
+  const size=132, r=50, cx=66, cy=66;
+  const pt=(hue,rad)=>{const a=(norm(hue)-90)*Math.PI/180; return [cx+rad*Math.cos(a), cy+rad*Math.sin(a)];};
+  let s=`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="awheel" aria-hidden="true">`;
+  s+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#ddd9cf" stroke-width="2"/>`;
+  const base=cols[cl.baseIndex];
+  [base.h, ...cl.scheme.offsets.map(o=>norm(base.h+o))].forEach(h=>{
+    const [x,y]=pt(h,r); s+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6.5" fill="none" stroke="#9a958a" stroke-width="1.5" stroke-dasharray="2 2"/>`;
+  });
+  cols.forEach((c,i)=>{const [x,y]=pt(c.h,r);
+    s+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${i===cl.baseIndex?7:6}" fill="${c.hex}" stroke="#fff" stroke-width="2"/>`;});
+  return s+`</svg>`;
+}
+function renderAnalyzeResult(){
+  const box=document.getElementById('analyzeResult');
+  const cols=analyzeColors();
+  if(cols.length<2){ box.hidden=true; box.innerHTML=''; return; }
+  const cl=classifyScheme(cols), tier=driftTier(cl.avg), base=cols[cl.baseIndex];
+  const others=cols.filter((_,k)=>k!==cl.baseIndex);
+  const nWord = cols.length===2?'two':'three';
+  const verdict = cl.scheme.id==='mono'
+    ? `they all sit within ${Math.round(cl.max)}° of a single hue — ${tier.note}.`
+    : `${tier.note}, about ${Math.round(cl.avg)}° off the textbook ideal${cols.length===3?`, ${Math.round(cl.max)}° at most`:''}.`;
+  const lines = [`<li><strong>${titleish(base)}</strong> — base hue ${Math.round(base.h)}°</li>`]
+    .concat(cl.scheme.offsets.map((off,k)=>{
+      const partner=others[cl.perm[k]], actual=norm(partner.h-base.h), drift=Math.round(hueDist(actual, norm(off)));
+      const ideal = cl.scheme.id==='mono' ? 'same hue' : `ideal ${Math.round(norm(off))}°`;
+      return `<li>${titleish(partner)} — ${Math.round(actual)}° from base (${ideal}, ${drift}° drift)</li>`;
+    }));
+  box.hidden=false;
+  box.innerHTML=`
+    <div class="ares-wheel">${analyzeWheelSVG(cl, cols)}</div>
+    <div class="ares-text">
+      <p class="ares-verdict">These ${nWord} read as <strong>${cl.scheme.name}</strong> — ${verdict}</p>
+      <ul class="ares-lines">${lines.join('')}</ul>
+      <p class="hint" style="margin:0">Driving the preview below. Clear a colour to return to your scheme.</p>
+    </div>`;
+}
+function afterAnalyzeChange(){
+  state.ratios=evenRatios(previewColors().length);
+  renderAnalyze(); renderRatio(); renderWhy();
+}
+
 /* ---------- render: WHY panel ---------- */
 function renderWhy(){
   const p=document.getElementById('whyPanel');
-  const temps=state.palette.map(s=>emo(s.color).temp);
+  const cols=previewColors();
+  const temps=cols.map(c=>emo(c).temp);
   const warm=temps.filter(t=>t==='warm').length, cool=temps.filter(t=>t==='cool').length, neu=temps.filter(t=>t==='neutral').length;
   const tot=temps.length||1;
-  const moodWords=[...new Set(state.palette.flatMap(s=>emo(s.color).words))].slice(0,5);
+  const moodWords=[...new Set(cols.flatMap(c=>emo(c).words))].slice(0,5);
+  let intro=state.harmony.why;
+  if(analyzeActive()){
+    const cl=classifyScheme(analyzeColors()), tier=driftTier(cl.avg);
+    intro=`Your selected colours read as a <strong>${cl.scheme.name.toLowerCase()}</strong> relationship — ${tier.label==='textbook'?'almost exactly textbook':`about ${Math.round(cl.avg)}° from the textbook ideal`}.`;
+  }
   const balanceNote = warm&&cool ? 'This palette balances warm and cool tones, which keeps it from feeling one-note.'
     : warm ? 'An all-warm palette — cosy and energising; ground it with a neutral if it feels intense.'
     : cool ? 'An all-cool palette — calm and composed; add a warm accent if you want more life.'
     : 'A neutral-led palette — quiet and flexible; bring in one saturated accent for focus.';
   p.innerHTML=`
     <div class="why-cell">
-      <p>${state.harmony.why}</p>
+      <p>${intro}</p>
       <div class="balance">
         <i style="width:${warm/tot*100}%;background:#d08a4e"></i>
         <i style="width:${neu/tot*100}%;background:#c9c3b3"></i>
@@ -411,14 +561,14 @@ function renderWhy(){
     </div>
     <div class="why-cell">
       <p><strong>Mood:</strong> ${moodWords.join(' · ')||'soft, understated'}.</p>
-      <p style="margin-bottom:0"><strong>Often suits:</strong> ${[...new Set(state.palette.map(s=>emo(s.color).rooms))].slice(0,2).join('; ')}.</p>
+      <p style="margin-bottom:0"><strong>Often suits:</strong> ${[...new Set(cols.map(c=>emo(c).rooms))].slice(0,2).join('; ')}.</p>
     </div>`;
 }
 
 /* ---------- ratio band with draggable dividers ---------- */
 function evenRatios(n){return Array(n).fill(1/n);}
 function setPreset(p){
-  const n=state.palette.length; if(!n) return;
+  const n=previewColors().length; if(!n) return;
   if(p==='even') state.ratios=evenRatios(n);
   else if(p==='603010') state.ratios = n===2?[0.65,0.35] : n===3?[0.6,0.3,0.1] : evenRatios(n);
   else if(p==='7030') state.ratios = n===2?[0.7,0.3] : n===3?[0.7,0.2,0.1] : evenRatios(n);
@@ -426,10 +576,10 @@ function setPreset(p){
 }
 function renderRatio(){
   const band=document.getElementById('ratioBand');
-  const n=state.palette.length; if(!n){band.innerHTML='';return;}
+  const cols=previewColors(), n=cols.length; if(!n){band.innerHTML='';return;}
   if(state.ratios.length!==n) state.ratios=evenRatios(n);
-  band.innerHTML = state.palette.map((s,i)=>{
-    const c=s.color, dark=c.l<55;
+  band.innerHTML = cols.map((c,i)=>{
+    const dark=c.l<55;
     const pct=Math.round(state.ratios[i]*100);
     return `<div class="rseg" data-i="${i}" style="flex:${state.ratios[i]} 0 0;background-color:${c.hex}">
       <div class="rlabel" style="color:${dark?'#fff':'#1c1b19'};background:${dark?'rgba(0,0,0,.28)':'rgba(255,255,255,.4)'}">
@@ -440,8 +590,36 @@ function renderRatio(){
 }
 
 /* ---------- wire up + init ---------- */
+/* ---------- shared floating tooltip (escapes scroll-container clipping) ---------- */
+const floatTip = document.createElement('div');
+floatTip.id='floatTip';
+function positionTip(sw){
+  const r=sw.getBoundingClientRect(), m=8;
+  const tw=floatTip.offsetWidth, th=floatTip.offsetHeight;
+  let left=Math.max(m, Math.min(r.left + r.width/2 - tw/2, innerWidth - tw - m));
+  let top=r.top - th - 8;
+  if(top < m) top=r.bottom + 8;            // flip below when no room above
+  floatTip.style.left=left+'px'; floatTip.style.top=top+'px';
+}
+function bindGridTips(container){
+  const show=e=>{ const sw=e.target.closest('.swatch[data-tip]'); if(!sw||!container.contains(sw)) return;
+    floatTip.textContent=sw.dataset.tip; floatTip.classList.add('show'); positionTip(sw); };
+  container.addEventListener('mouseover', show);
+  container.addEventListener('mousemove', e=>{ const sw=e.target.closest('.swatch[data-tip]'); if(sw) positionTip(sw); });
+  container.addEventListener('mouseout', e=>{
+    const sw=e.target.closest('.swatch[data-tip]');
+    const to=e.relatedTarget&&e.relatedTarget.closest?e.relatedTarget.closest('.swatch[data-tip]'):null;
+    if(sw && to!==sw) floatTip.classList.remove('show');
+  });
+  container.addEventListener('scroll', ()=>floatTip.classList.remove('show'));
+}
+
 function init(){
   document.getElementById('colorCount').textContent=COLORS.length.toLocaleString();
+  document.body.appendChild(floatTip);
+  bindGridTips(document.getElementById('swatchGrid'));
+  bindGridTips(document.getElementById('neutralGrid'));
+  bindGridTips(document.getElementById('paletteTray'));
   // count toggle
   document.querySelectorAll('#countToggle .seg-btn').forEach(b=>b.onclick=()=>{
     document.querySelectorAll('#countToggle .seg-btn').forEach(x=>{x.classList.remove('is-active');x.setAttribute('aria-selected','false');});
@@ -453,7 +631,7 @@ function init(){
   document.getElementById('mutedOnly').onchange=e=>{state.muted=e.target.checked; renderGrid();};
   document.querySelectorAll('.ratio-presets button').forEach(b=>b.onclick=()=>setPreset(b.dataset.preset));
 
-  renderHarmonies(); renderFamilyChips(); renderGrid();
+  renderHarmonies(); renderFamilyChips(); renderGrid(); renderAnalyze();
 
   // sensible default base so the tool isn't empty: a mid Blue
   const def = COLORS.filter(c=>c.family==='Blue'&&!c.neutral).sort((a,b)=>Math.abs(a.l-50)-Math.abs(b.l-50))[0]
