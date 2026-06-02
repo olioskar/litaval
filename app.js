@@ -82,7 +82,7 @@ function pickBest(base, ax, used){
   let best=null, bs=1e9;
   for (const c of COLORS){
     if (!qualifies(c, ax, base, used, null)) continue;
-    const sc=(ax.valueOnly?0:hueDist(c.h,ax.centerHue)) + Math.abs(c.l-ax.centerL)*0.3;
+    const sc=(ax.valueOnly?Math.abs(c.s-base.s)*0.1:hueDist(c.h,ax.centerHue)) + Math.abs(c.l-ax.centerL)*0.3;
     if (sc<bs){bs=sc; best=c;}
   }
   return best;
@@ -93,11 +93,14 @@ function buildPalette(base, harmony){
   const slots = [{role:'Base', color:base}];
   const used = new Set([base.hex]);
   if (harmony.mono){
+    // shade targets are a relative step from the base lightness (not a fixed extreme),
+    // clamped to a readable range so the contrast scales with how light/dark the base is
+    const STEP=30, clampL=v=>clamp(v,18,86);
     const defs = harmony.steps===2
-      ? [[base.l>50 ? 20 : 80, 'Shade']]
-      : [[Math.max(base.l,82),'Lighter'], [Math.min(base.l,28),'Deeper']];
+      ? [[clampL(base.l>50 ? base.l-STEP : base.l+STEP), 'Shade']]
+      : [[clampL(base.l+STEP),'Lighter'], [clampL(base.l-STEP),'Deeper']];
     for (const [t,role] of defs){
-      const ax={valueOnly:true, family:base.family, centerHue:base.h, centerL:t, Vval:30, rowMax:3, colMax:0};
+      const ax={valueOnly:true, family:base.family, centerHue:base.h, centerL:t, Vval:30, rowMax:3, colMax:2, satBin:14};
       const pick=pickBest(base, ax, used) || pickBestByL(base, ax, used);
       if (pick){ used.add(pick.hex); slots.push({role, color:pick, axis:ax}); }
     }
@@ -134,14 +137,16 @@ function buildMatrix(s, i){
   for (const c of COLORS){
     if (!qualifies(c, ax, base, others, s.color.hex)) continue;
     let col=0;
-    if (!ax.valueOnly){
+    if (ax.valueOnly){
+      col=clamp(Math.round((c.s-base.s)/ax.satBin), -ax.colMax, ax.colMax);
+    } else {
       const dh=signedDelta(c.h, ax.centerHue);
       col=clamp(Math.round(dh/ax.binW), -ax.colMax, ax.colMax);
     }
     const dl=c.l-ax.centerL;
     const row=clamp(Math.round(dl/rowBin), -ax.rowMax, ax.rowMax);
     const key=col+','+row;
-    const score=(ax.valueOnly?0:hueDist(c.h,ax.centerHue)) + Math.abs(dl)*0.3;
+    const score=(ax.valueOnly?Math.abs(c.s-base.s)*0.1:hueDist(c.h,ax.centerHue)) + Math.abs(dl)*0.3;
     const ex=cells.get(key);
     if (!ex || score<ex.score) cells.set(key, {c, score});
   }
@@ -149,7 +154,7 @@ function buildMatrix(s, i){
 }
 function renderMatrix(s, i){
   const ax=s.axis, cells=buildMatrix(s, i);
-  const cols=[]; if (ax.valueOnly) cols.push(0); else for(let x=-ax.colMax;x<=ax.colMax;x++) cols.push(x);
+  const cols=[]; for(let x=-ax.colMax;x<=ax.colMax;x++) cols.push(x);
   const rows=[]; for(let y=ax.rowMax;y>=-ax.rowMax;y--) rows.push(y);
   let h=`<div class="alt-matrix${ax.valueOnly?' value-only':''}" style="grid-template-columns:repeat(${cols.length},34px)">`;
   for (const y of rows) for (const x of cols){
@@ -273,7 +278,7 @@ function renderResult(){
     const altBlock = s.axis ? `
       <div class="alts">
         <span class="alts-label">${s.axis.valueOnly
-          ? 'Value ladder · centre = best · lighter ↑ / darker ↓ · tap to swap'
+          ? 'Centre = best · lighter ↑ / darker ↓ · muted ← / vivid → · tap to swap'
           : 'Centre = best match · hue ←→ · value (lighter ↑ / darker ↓) · tap to swap'}</span>
         ${renderMatrix(s, i)}
       </div>` : '';
