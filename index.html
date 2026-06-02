@@ -58,6 +58,16 @@
   <section class="panel" id="resultPanel" hidden>
     <div class="step"><span class="num">3</span><h2>Your palette</h2></div>
     <div class="palette-tray" id="paletteTray"><!-- slots injected --></div>
+
+    <div class="neutral-picker" id="neutralPicker" hidden>
+      <div class="np-head">
+        <h3>Swap in a neutral</h3>
+        <div class="seg np-target" id="neutralTarget" role="tablist" aria-label="Palette slot to replace"><!-- slot tabs injected --></div>
+      </div>
+      <p class="hint">Neutrals work alongside any scheme. Pick the slot to replace, then tap a neutral to drop it in.</p>
+      <div class="family-chips np-fams" id="neutralFams"><!-- chips injected --></div>
+      <div class="swatch-grid np-grid" id="neutralGrid"><!-- neutral swatches injected --></div>
+    </div>
   </section>
 
   <!-- STEP 4: preview the harmony in proportion -->

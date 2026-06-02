@@ -68,8 +68,8 @@ const hueScore = (c, ax) => ax.idealOff != null
 /* per-harmony hue tolerance (± degrees from the ideal target before the relationship degrades).
    `minBase` keeps analogous neighbours from collapsing into the base hue. */
 const TOL = {
-  complementary:{h:20}, analogous2:{h:12,minBase:18}, analogous3:{h:12,minBase:18},
-  triadic:{h:18}, split:{h:15},
+  complementary:{h:30}, analogous2:{h:18,minBase:18}, analogous3:{h:18,minBase:18},
+  triadic:{h:28}, split:{h:22},
 };
 
 /* does a colour qualify for this slot's tolerance window? */
@@ -107,14 +107,14 @@ function buildPalette(base, harmony){
       ? [[clampL(base.l>50 ? base.l-STEP : base.l+STEP), 'Shade']]
       : [[clampL(base.l+STEP),'Lighter'], [clampL(base.l-STEP),'Deeper']];
     for (const [t,role] of defs){
-      const ax={valueOnly:true, centerHue:base.h, hueLimit:15, centerL:t, Vval:30, rowMax:3, colMax:2, satBin:14};
+      const ax={valueOnly:true, centerHue:base.h, hueLimit:22, centerL:t, Vval:30, rowMax:3, colMax:2, satBin:14};
       const pick=pickBest(base, ax, used) || pickBestByL(base, ax, used);
       if (pick){ used.add(pick.hex); slots.push({role, color:pick, axis:ax}); }
     }
   } else if (harmony.biDir){
     // analogous on BOTH sides: centre the axis on the base hue so the matrix fans out to
     // the -off and +off neighbours symmetrically (centre columns stay empty via minBase).
-    const off=harmony.offsets[0], binW=12, colMax=4;
+    const off=harmony.offsets[0], binW=16, colMax=4;
     // dead-zone just past half a column so ONLY the centre column (the base hue) stays empty
     const ax={valueOnly:false, biDir:true, idealOff:off, centerHue:base.h, centerL:base.l,
               binW, hueLimit:(colMax+0.5)*binW, minBase:binW/2+1,
@@ -197,7 +197,13 @@ function roleName(off){
 
 /* ---------- state ---------- */
 const state = {count:2, harmony:HARMONIES[2][0], base:null, filterFamily:'All', muted:false, search:'',
-               palette:[], ratios:[]};
+               palette:[], ratios:[], activeSlot:1, neutralFam:'All'};
+
+/* neutrals (White / Warm Neutral / Cool Neutral) — browsable any time to swap into a slot.
+   Sorted by family group, then light → dark for a readable ramp. */
+const NEUTRAL_FAMS=['All','White','Warm Neutral','Cool Neutral'];
+const NEUTRALS = COLORS.filter(c=>c.neutral)
+  .sort((a,b)=> (NEUTRAL_FAMS.indexOf(a.family)-NEUTRAL_FAMS.indexOf(b.family)) || (b.l-a.l));
 
 /* ---------- render: harmony chips with mini wheels ---------- */
 function wheelSVG(harmony){
@@ -276,7 +282,7 @@ function recompute(){
   if(!state.base){return;}
   state.palette=buildPalette(state.base, state.harmony);
   state.ratios=evenRatios(state.palette.length);
-  renderResult(); renderWhy(); renderRatio();
+  renderResult(); renderWhy(); renderRatio(); renderNeutralPicker();
   document.getElementById('resultPanel').hidden=false;
   document.getElementById('whySection').hidden=false;
   document.getElementById('ratioSection').hidden=false;
@@ -328,7 +334,57 @@ function renderResult(){
 function selectAlt(i, hex, name){
   const s=state.palette[i]; if(!s.axis) return;
   const pick=COLORS.find(c=>c.hex===hex && c.name===name);
-  if(pick){ s.color=pick; renderResult(); renderWhy(); renderRatio(); }
+  if(pick){ s.color=pick; renderResult(); renderWhy(); renderRatio();
+    if(i===state.activeSlot) renderNeutralGrid(); }
+}
+
+/* ---------- render: neutral picker (within Step 3) ---------- */
+function renderNeutralPicker(){
+  const wrap=document.getElementById('neutralPicker');
+  if(!state.palette.length){ wrap.hidden=true; return; }
+  wrap.hidden=false;
+  if(state.activeSlot==null || state.activeSlot>=state.palette.length)
+    state.activeSlot = state.palette.length>1 ? 1 : 0;
+  renderNeutralTarget(); renderNeutralFams(); renderNeutralGrid();
+}
+function renderNeutralTarget(){
+  const t=document.getElementById('neutralTarget');
+  t.innerHTML=state.palette.map((s,i)=>
+    `<button class="seg-btn ${i===state.activeSlot?'is-active':''}" data-slot="${i}"
+       role="tab" aria-selected="${i===state.activeSlot}">${s.role}</button>`).join('');
+  t.querySelectorAll('.seg-btn').forEach(b=>b.onclick=()=>{
+    state.activeSlot=+b.dataset.slot; renderNeutralTarget(); renderNeutralGrid();
+  });
+}
+function renderNeutralFams(){
+  const f=document.getElementById('neutralFams');
+  f.innerHTML=NEUTRAL_FAMS.map(fam=>
+    `<button class="fchip ${state.neutralFam===fam?'is-active':''}" data-f="${fam}">
+       ${fam==='All'?'':`<span class="dot" style="background:${familySwatchColor(fam)}"></span>`}${fam}
+     </button>`).join('');
+  f.querySelectorAll('.fchip').forEach(b=>b.onclick=()=>{
+    state.neutralFam=b.dataset.f; renderNeutralFams(); renderNeutralGrid();
+  });
+}
+function renderNeutralGrid(){
+  const grid=document.getElementById('neutralGrid');
+  const cur=state.palette[state.activeSlot] && state.palette[state.activeSlot].color;
+  const list=NEUTRALS.filter(c=>state.neutralFam==='All' || c.family===state.neutralFam);
+  grid.innerHTML=list.map(c=>{
+    const sel=cur && cur.hex===c.hex && cur.name===c.name ? ' is-sel' : '';
+    return `<button class="swatch${sel}" style="background-color:${c.hex}"
+      data-hex="${c.hex}" data-name="${encodeURIComponent(c.name)}" title="">
+      <span class="tip">${titleish(c)} · ${c.hex}</span></button>`;
+  }).join('')
+    + (list.length===0?`<div class="empty-hint">No neutrals in this group.</div>`:'');
+  grid.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>{
+    const nm=decodeURIComponent(b.dataset.name);
+    const pick=NEUTRALS.find(c=>c.hex===b.dataset.hex && c.name===nm);
+    const s=state.palette[state.activeSlot];
+    if(!pick || !s) return;
+    s.color=pick;
+    renderResult(); renderWhy(); renderRatio(); renderNeutralGrid();
+  });
 }
 
 /* ---------- render: WHY panel ---------- */
