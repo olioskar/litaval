@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Litaval — Serefni colour pairing tool</title>
+<link rel="preconnect" href="https://serefni.is">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>Litaval</h1>
+    <p class="lede">Pick a pair or trio of <a href="https://serefni.is/litir/" target="_blank" rel="noopener">Sérefni</a> paint colours that work together — guided by colour theory, with the reasoning made plain.</p>
+    <p class="count"><strong id="colorCount">0</strong> real Sérefni colours loaded</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- STEP 1: scheme + harmony -->
+  <section class="panel" id="schemePanel">
+    <div class="step"><span class="num">1</span><h2>Choose a colour scheme</h2></div>
+
+    <div class="row">
+      <div class="field">
+        <label>How many colours?</label>
+        <div class="seg" id="countToggle" role="tablist" aria-label="Number of colours">
+          <button class="seg-btn is-active" data-count="2" role="tab" aria-selected="true">Pair · 2</button>
+          <button class="seg-btn" data-count="3" role="tab" aria-selected="false">Trio · 3</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Harmony rule</label>
+      <div class="harmony-grid" id="harmonyGrid"><!-- chips injected --></div>
+    </div>
+  </section>
+
+  <!-- STEP 2: base colour -->
+  <section class="panel" id="basePanel">
+    <div class="step"><span class="num">2</span><h2>Pick your base colour</h2>
+      <p class="hint">This is your anchor — the dominant colour the others are built around.</p>
+    </div>
+
+    <div class="filters">
+      <input type="search" id="search" placeholder="Search by name or number…" autocomplete="off">
+      <label class="check"><input type="checkbox" id="mutedOnly"> Muted tones only</label>
+      <span class="grid-count" id="gridCount"></span>
+    </div>
+    <div class="family-chips" id="familyChips"><!-- injected --></div>
+    <div class="swatch-grid" id="swatchGrid"><!-- injected --></div>
+  </section>
+
+  <!-- STEP 3: result palette -->
+  <section class="panel" id="resultPanel" hidden>
+    <div class="step"><span class="num">3</span><h2>Your palette</h2></div>
+    <div class="palette-tray" id="paletteTray"><!-- slots injected --></div>
+  </section>
+
+  <!-- Why it works -->
+  <section class="panel" id="whySection" hidden>
+    <div class="step"><h2>Why these work together</h2></div>
+    <div class="why-grid" id="whyPanel"><!-- injected --></div>
+  </section>
+</main>
+
+<!-- FULL WIDTH ratio band -->
+<section class="ratio-section" id="ratioSection" hidden>
+  <div class="wrap ratio-head">
+    <h2>Tune the proportions</h2>
+    <div class="ratio-presets">
+      <button data-preset="even">Even</button>
+      <button data-preset="603010">60·30·10</button>
+      <button data-preset="7030">70·30</button>
+    </div>
+  </div>
+  <div class="ratio-band" id="ratioBand"><!-- segments + handles injected --></div>
+</section>
+
+<footer class="wrap site-foot">
+  <p>Colours scraped from <a href="https://serefni.is/litir/" target="_blank" rel="noopener">serefni.is/litir</a>. This is an independent exploration tool — swatches are screen approximations; always confirm with a physical sample. Hex values come straight from Sérefni's site.</p>
+</footer>
+
+<script src="colors.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
