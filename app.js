@@ -60,6 +60,7 @@ const matchesQuery = (c,q) => c.name.toLowerCase().includes(q)
 const akaLine = c => (c.aka&&c.aka.length) ? c.aka.join(' · ') : '';
 const escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
 const tipFor = c => `${titleish(c)} · ${c.hex}${akaLine(c)?` · aka ${akaLine(c)}`:''}`;
+const artic = w => /^[aeiou]/i.test(w) ? 'An' : 'A';   // a/an by the following word
 
 /* hue closeness score for a slot. Normally "closest to the centre hue is best".
    For a bidirectional axis (idealOff set) the centre is the BASE hue, so score by how
@@ -531,6 +532,36 @@ function afterAnalyzeChange(){
   renderAnalyze(); renderRatio(); renderWhy();
 }
 
+/* how far each generated partner landed from its textbook target — mirrors the
+   analyser's drift readout, but measured against the harmony we deliberately built. */
+function paletteTheory(){
+  const slots=state.palette; if(slots.length<2) return null;
+  const base=slots[0].color, partners=slots.slice(1);
+  if(state.harmony.mono){
+    const spread=Math.max(0,...partners.map(s=>hueDist(s.color.h, base.h)));
+    const lines=partners.map(s=>
+      `<li><strong>${titleish(s.color)}</strong> — ${s.role.toLowerCase()}, L ${Math.round(s.color.l)} vs base L ${Math.round(base.l)} · ${Math.round(hueDist(s.color.h,base.h))}° off the base hue</li>`);
+    return {mono:true, avg:spread, max:spread, lines};
+  }
+  const drifts=[];
+  const lines=[`<li><strong>${titleish(base)}</strong> — base hue ${Math.round(base.h)}°</li>`]
+    .concat(partners.map(s=>{
+      const ax=s.axis, actual=norm(s.color.h-base.h);
+      let idealOff, drift;
+      if(ax.idealOff!=null){                                   // biDir analogous: nearest neighbour side
+        idealOff = actual<=180 ? ax.idealOff : norm(-ax.idealOff);
+        drift = Math.abs(hueDist(s.color.h, base.h) - ax.idealOff);
+      } else {
+        idealOff = norm(ax.centerHue - base.h);
+        drift = hueDist(s.color.h, ax.centerHue);
+      }
+      drifts.push(drift);
+      return `<li><strong>${titleish(s.color)}</strong> — ${Math.round(actual)}° from base (ideal ${Math.round(idealOff)}°, ${Math.round(drift)}° drift)</li>`;
+    }));
+  const avg=drifts.reduce((a,d)=>a+d,0)/(drifts.length||1), max=Math.max(0,...drifts);
+  return {mono:false, avg, max, lines};
+}
+
 /* ---------- render: WHY panel ---------- */
 function renderWhy(){
   const p=document.getElementById('whyPanel');
@@ -539,18 +570,41 @@ function renderWhy(){
   const warm=temps.filter(t=>t==='warm').length, cool=temps.filter(t=>t==='cool').length, neu=temps.filter(t=>t==='neutral').length;
   const tot=temps.length||1;
   const moodWords=[...new Set(cols.flatMap(c=>emo(c).words))].slice(0,5);
-  let intro=state.harmony.why;
+
+  // deviation-from-theory readout — same shape as "Analyse your own colours"
+  let verdict='', lines=[], blurb='';
   if(analyzeActive()){
-    const cl=classifyScheme(analyzeColors()), tier=driftTier(cl.avg);
-    intro=`Your selected colours read as a <strong>${cl.scheme.name.toLowerCase()}</strong> relationship — ${tier.label==='textbook'?'almost exactly textbook':`about ${Math.round(cl.avg)}° from the textbook ideal`}.`;
+    const ac=analyzeColors(), cl=classifyScheme(ac), tier=driftTier(cl.avg);
+    const base=ac[cl.baseIndex], others=ac.filter((_,k)=>k!==cl.baseIndex);
+    verdict = cl.scheme.id==='mono'
+      ? `Your selection reads as <strong>${cl.scheme.name}</strong> — all within ${Math.round(cl.max)}° of one hue, ${tier.note}.`
+      : `Your selection reads as <strong>${cl.scheme.name}</strong> — ${tier.note}, about ${Math.round(cl.avg)}° off the textbook ideal${ac.length===3?`, ${Math.round(cl.max)}° at most`:''}.`;
+    lines=[`<li><strong>${titleish(base)}</strong> — base hue ${Math.round(base.h)}°</li>`]
+      .concat(cl.scheme.offsets.map((off,k)=>{
+        const partner=others[cl.perm[k]], actual=norm(partner.h-base.h), drift=Math.round(hueDist(actual, norm(off)));
+        const ideal = cl.scheme.id==='mono' ? 'same hue' : `ideal ${Math.round(norm(off))}°`;
+        return `<li><strong>${titleish(partner)}</strong> — ${Math.round(actual)}° from base (${ideal}, ${drift}° drift)</li>`;
+      }));
+  } else {
+    const t=paletteTheory();
+    if(t){
+      const tier=driftTier(t.avg); lines=t.lines;
+      verdict = t.mono
+        ? `${artic(state.harmony.name)} <strong>${state.harmony.name}</strong> scheme — your tones sit within ${Math.round(t.max)}° of a single hue, ${tier.note}.`
+        : `${artic(state.harmony.name)} <strong>${state.harmony.name}</strong> scheme — these picks land ${tier.note}, about ${Math.round(t.avg)}° off the textbook ideal${t.lines.length>2?`, ${Math.round(t.max)}° at most`:''}.`;
+    }
+    blurb=state.harmony.why;
   }
+
   const balanceNote = warm&&cool ? 'This palette balances warm and cool tones, which keeps it from feeling one-note.'
     : warm ? 'An all-warm palette — cosy and energising; ground it with a neutral if it feels intense.'
     : cool ? 'An all-cool palette — calm and composed; add a warm accent if you want more life.'
     : 'A neutral-led palette — quiet and flexible; bring in one saturated accent for focus.';
   p.innerHTML=`
     <div class="why-cell">
-      <p>${intro}</p>
+      ${verdict?`<p class="ares-verdict">${verdict}</p>`:''}
+      ${lines.length?`<ul class="ares-lines">${lines.join('')}</ul>`:''}
+      ${blurb?`<p>${blurb}</p>`:''}
       <div class="balance">
         <i style="width:${warm/tot*100}%;background:#d08a4e"></i>
         <i style="width:${neu/tot*100}%;background:#c9c3b3"></i>
