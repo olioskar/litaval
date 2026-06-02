@@ -348,8 +348,8 @@ function renderWhy(){
       <p>${state.harmony.why}</p>
       <div class="balance">
         <i style="width:${warm/tot*100}%;background:#d08a4e"></i>
-        <i style="width:${cool/tot*100}%;background:#5a86a8"></i>
         <i style="width:${neu/tot*100}%;background:#c9c3b3"></i>
+        <i style="width:${cool/tot*100}%;background:#5a86a8"></i>
       </div>
       <div class="balance-label"><span>${warm} warm</span><span>${neu} neutral</span><span>${cool} cool</span></div>
       <p style="margin:12px 0 0">${balanceNote}</p>
@@ -381,46 +381,7 @@ function renderRatio(){
         <span class="pct">${pct}%</span><span class="rn">${titleish(c)}</span>
       </div>
     </div>`;
-  }).join('') + state.palette.slice(0,-1).map((_,i)=>`<div class="rhandle" data-h="${i}"><span class="grip"></span></div>`).join('');
-  positionHandles(); attachDrag();
-}
-function positionHandles(){
-  const band=document.getElementById('ratioBand');
-  const handles=band.querySelectorAll('.rhandle');
-  let acc=0;
-  handles.forEach((h,i)=>{acc+=state.ratios[i]; h.style.left=(acc*100)+'%';});
-}
-function attachDrag(){
-  const band=document.getElementById('ratioBand');
-  band.querySelectorAll('.rhandle').forEach(h=>{
-    h.onpointerdown=e=>{
-      e.preventDefault();
-      const i=+h.dataset.h;
-      const rect=band.getBoundingClientRect();
-      const move=ev=>{
-        const x=Math.min(Math.max((ev.clientX-rect.left)/rect.width,0),1);
-        // boundary before segment i = sum ratios[0..i-1]; we set boundary between i and i+1
-        let before=0; for(let k=0;k<i;k++) before+=state.ratios[k];
-        const pairTotal=state.ratios[i]+state.ratios[i+1];
-        const min=0.03;
-        let left=Math.min(Math.max(x-before,min),pairTotal-min);
-        state.ratios[i]=left; state.ratios[i+1]=pairTotal-left;
-        updateRatioSizes();
-      };
-      const up=()=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',up);};
-      document.addEventListener('pointermove',move);
-      document.addEventListener('pointerup',up);
-    };
-  });
-}
-function updateRatioSizes(){
-  const band=document.getElementById('ratioBand');
-  band.querySelectorAll('.rseg').forEach((seg,i)=>{
-    seg.style.flexGrow=state.ratios[i];
-    const pct=Math.round(state.ratios[i]*100);
-    const lab=seg.querySelector('.pct'); if(lab) lab.textContent=pct+'%';
-  });
-  positionHandles();
+  }).join('');
 }
 
 /* ---------- wire up + init ---------- */
