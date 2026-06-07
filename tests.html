@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Litaval — pure-logic tests</title>
+<style>
+  body{font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; margin:24px; color:#1c1b19; background:#faf9f5}
+  h1{font-size:18px} #summary{font-size:16px; font-weight:700; padding:8px 12px; border-radius:8px; display:inline-block}
+  .ok{background:#dcefdc; color:#1f5130} .bad{background:#f3d6d2; color:#7a2018}
+  ul{list-style:none; padding:0} li{padding:2px 0} li.f{color:#7a2018} li.p{color:#3a7a4a}
+  code{background:#efece4; padding:1px 4px; border-radius:4px}
+</style>
+</head>
+<body>
+<h1>Litaval — pure-logic tests</h1>
+<p>Zero-dependency harness. Loads <code>colors.js</code> + <code>app.js</code> behind a test flag and
+asserts the pure helpers. No framework. Open this file via the same server as the app.</p>
+<p id="summary">running…</p>
+<ul id="out"></ul>
+
+<script>window.__LITAVAL_TEST__ = true;</script>
+<script src="colors.js"></script>
+<script src="app.js"></script>
+<script>
+(() => {
+  const T = window.__LITAVAL_TEST__;
+  const out = document.getElementById('out');
+  let pass = 0, fail = 0;
+  const rec = (name, ok, detail) => {
+    (ok ? pass++ : fail++);
+    const li = document.createElement('li');
+    li.className = ok ? 'p' : 'f';
+    li.textContent = `${ok ? '✓' : '✗'} ${name}${ok ? '' : ' — ' + detail}`;
+    out.appendChild(li);
+  };
+  const eq = (name, got, want) =>
+    rec(name, JSON.stringify(got) === JSON.stringify(want), `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  const ok = (name, cond, detail='') => rec(name, !!cond, detail);
+
+  if (!T || !T.norm) { document.getElementById('summary').textContent = 'FAILED: test export not present (is window.__LITAVAL_TEST__ set before app.js?)'; return; }
+
+  // --- norm ---
+  eq('norm(-30)=330', T.norm(-30), 330);
+  eq('norm(360)=0', T.norm(360), 0);
+  eq('norm(370)=10', T.norm(370), 10);
+  eq('norm(-390)=330', T.norm(-390), 330);
+
+  // --- hueDist ---
+  eq('hueDist(10,350)=20', T.hueDist(10,350), 20);
+  eq('hueDist(0,180)=180', T.hueDist(0,180), 180);
+  eq('hueDist(350,10)=20', T.hueDist(350,10), 20);
+  ok('hueDist symmetric', T.hueDist(33,200) === T.hueDist(200,33));
+
+  // --- clamp ---
+  eq('clamp mid', T.clamp(5,0,10), 5);
+  eq('clamp low', T.clamp(-3,0,10), 0);
+  eq('clamp high', T.clamp(99,0,10), 10);
+
+  // --- hueBand / isWarmHue / tempOf ---
+  eq('hueBand(15) -> orange row', T.hueBand(15).moods, ['enthusiasm','sociability','warmth']);
+  eq('hueBand(344) -> magenta row', T.hueBand(344).moods, ['creativity','sensitivity','playfulness']);
+  eq('hueBand(345) -> red row', T.hueBand(345).moods, ['passion','warmth','energy']);
+  eq('hueBand(NaN) -> empty (no fabricated moods)', T.hueBand(NaN).moods, []);
+  ok('isWarmHue(69) warm', T.isWarmHue(69) === true);
+  ok('isWarmHue(70) cool', T.isWarmHue(70) === false);
+  ok('isWarmHue(289) cool', T.isWarmHue(289) === false);
+  ok('isWarmHue(290) warm', T.isWarmHue(290) === true);
+  eq('tempOf neutral (low sat)', T.tempOf({h:0,s:5,l:50}), 'neutral');
+  eq('tempOf warm', T.tempOf({h:30,s:60,l:50}), 'warm');
+  eq('tempOf cool', T.tempOf({h:200,s:60,l:50}), 'cool');
+
+  // --- roleName ---
+  eq('roleName(180)=Complement', T.roleName(180), 'Complement');
+  eq('roleName(-30)=Neighbour', T.roleName(-30), 'Neighbour');
+  eq('roleName(210)=Split partner', T.roleName(210), 'Split partner');
+  eq('roleName(240)=Triad partner', T.roleName(240), 'Triad partner');
+  eq('roleName(90)=Partner', T.roleName(90), 'Partner');
+
+  // --- driftTier thresholds ---
+  eq('driftTier(7)=textbook', T.driftTier(7).label, 'textbook');
+  eq('driftTier(8)=close', T.driftTier(8).label, 'close');
+  eq('driftTier(17)=close', T.driftTier(17).label, 'close');
+  eq('driftTier(18)=loose', T.driftTier(18).label, 'loose');
+  eq('driftTier(31)=loose', T.driftTier(31).label, 'loose');
+  eq('driftTier(32)=unconventional', T.driftTier(32).label, 'unconventional');
+
+  // --- classifyScheme ---
+  const C = (...hs) => hs.map(h => ({h, s:60, l:50}));
+  eq('classify [0,180] -> complementary', T.classifyScheme(C(0,180)).scheme.id, 'complementary');
+  eq('classify [0,30] -> analogous', T.classifyScheme(C(0,30)).scheme.id, 'analogous');
+  eq('classify [200,205] -> mono', T.classifyScheme(C(200,205)).scheme.id, 'mono');
+  eq('classify [0,120,240] -> triadic', T.classifyScheme(C(0,120,240)).scheme.id, 'triadic');
+  eq('classify [10,145,215] -> split', T.classifyScheme(C(10,145,215)).scheme.id, 'split');
+  ok('classify wraparound [350,20] -> analogous, ~0 drift',
+     T.classifyScheme(C(350,20)).scheme.id === 'analogous' && T.classifyScheme(C(350,20)).avg < 1);
+
+  // --- qualifies ---
+  const base = {h:0, s:60, l:50, hex:'#base', name:'base', neutral:false};
+  const axHue = {valueOnly:false, centerHue:0, hueLimit:30, minBase:0};
+  const mk = (h,l,extra={}) => ({h, l, s:60, hex:'#'+h+'-'+l, name:'c'+h+l, neutral:false, ...extra});
+  ok('qualifies: within hueLimit', T.qualifies(mk(20,50), axHue, base, new Set(), null) === true);
+  ok('qualifies: outside hueLimit rejected', T.qualifies(mk(50,50), axHue, base, new Set(), null) === false);
+  ok('qualifies: too light rejected (l>90)', T.qualifies(mk(10,95), axHue, base, new Set(), null) === false);
+  ok('qualifies: too dark rejected (l<12)', T.qualifies(mk(10,5), axHue, base, new Set(), null) === false);
+  ok('qualifies: neutral rejected', T.qualifies(mk(10,50,{neutral:true}), axHue, base, new Set(), null) === false);
+  ok('qualifies: used-elsewhere rejected', T.qualifies({...mk(10,50), hex:'#dup'}, axHue, base, new Set(['#dup']), null) === false);
+  const axDir = {valueOnly:true, centerHue:0, hueLimit:20, dir:1};
+  ok('qualifies dir+1: lighter passes', T.qualifies(mk(2,60), axDir, base, new Set(), null) === true);
+  ok('qualifies dir+1: darker rejected', T.qualifies(mk(2,40), axDir, base, new Set(), null) === false);
+
+  // --- paletteNarrative ---
+  eq('narrative <2 colours -> []', T.paletteNarrative([{h:0,s:50,l:50}], [1]), []);
+  ok('narrative even split -> "more saturated", not "largest share"', (() => {
+    const s = T.paletteNarrative([{h:30,s:80,l:50},{h:210,s:40,l:50}], [0.5,0.5]);
+    return /more saturated/.test(s[0]) && !/largest share/.test(s[0]);
+  })());
+  ok('narrative 70/30 -> "largest share"', (() => {
+    const s = T.paletteNarrative([{h:30,s:80,l:50},{h:210,s:40,l:50}], [0.7,0.3]);
+    return /largest share/.test(s[0]);
+  })());
+
+  // --- ratio presets invariants ---
+  for (const n of [2,3]) {
+    T.RATIO_PRESETS[n].forEach((p,i) => {
+      eq(`preset ${n}#${i} length=${n}`, p.r.length, n);
+      ok(`preset ${n}#${i} sums to 1`, Math.abs(p.r.reduce((a,b)=>a+b,0) - 1) < 1e-9, `sum=${p.r.reduce((a,b)=>a+b,0)}`);
+    });
+  }
+  ok('ratioPresetsFor(5) falls back to 2-colour presets', T.ratioPresetsFor(5) === T.RATIO_PRESETS[2]);
+
+  // --- summary ---
+  const sum = document.getElementById('summary');
+  sum.textContent = `${pass} passed, ${fail} failed`;
+  sum.className = fail === 0 ? 'ok' : 'bad';
+})();
+</script>
+</body>
+</html>

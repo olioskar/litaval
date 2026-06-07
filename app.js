@@ -2,22 +2,23 @@
 'use strict';
 const COLORS = window.SEREFNI_COLORS || [];
 
-/* ---------- colour-emotion knowledge (grounded in colour psychology research) ---------- */
+/* ---------- mood words by family — UX flavour for the palette-tray tags only ----------
+   (temperature is derived from hue via tempOf, not from family; see "families are UX-only".) */
 const EMOTION = {
-  'Red':         {temp:'warm', words:['energy','passion','boldness'], rooms:'social & dining spaces'},
-  'Orange':      {temp:'warm', words:['warmth','sociable','playful'], rooms:'kitchens & social rooms'},
-  'Amber':       {temp:'warm', words:['cosy','grounded','golden'],    rooms:'living rooms & hallways'},
-  'Yellow':      {temp:'warm', words:['happy','uplifting','bright'],  rooms:'kitchens & creative spaces'},
-  'Yellow-Green':{temp:'warm', words:['fresh','natural','lively'],    rooms:'kitchens & sunrooms'},
-  'Green':       {temp:'cool', words:['balanced','restful','natural'],rooms:'bedrooms & wellness spaces'},
-  'Teal':        {temp:'cool', words:['calm','refined','serene'],     rooms:'bathrooms & studies'},
-  'Blue':        {temp:'cool', words:['calm','trust','focus'],        rooms:'bedrooms & offices'},
-  'Violet':      {temp:'cool', words:['creative','luxurious','intimate'], rooms:'bedrooms & accent walls'},
-  'White':       {temp:'neutral', words:['clean','airy','open'],      rooms:'any space, as a base'},
-  'Warm Neutral':{temp:'warm', words:['soft','grounded','inviting'],  rooms:'any space, as a base'},
-  'Cool Neutral':{temp:'cool', words:['quiet','modern','composed'],   rooms:'any space, as a base'},
+  'Red':         {words:['energy','passion','boldness']},
+  'Orange':      {words:['warmth','sociable','playful']},
+  'Amber':       {words:['cosy','grounded','golden']},
+  'Yellow':      {words:['happy','uplifting','bright']},
+  'Yellow-Green':{words:['fresh','natural','lively']},
+  'Green':       {words:['balanced','restful','natural']},
+  'Teal':        {words:['calm','refined','serene']},
+  'Blue':        {words:['calm','trust','focus']},
+  'Violet':      {words:['creative','luxurious','intimate']},
+  'White':       {words:['clean','airy','open']},
+  'Warm Neutral':{words:['soft','grounded','inviting']},
+  'Cool Neutral':{words:['quiet','modern','composed']},
 };
-const emo = c => EMOTION[c.family] || {temp:'neutral', words:[], rooms:'any space'};
+const emo = c => EMOTION[c.family] || {words:[]};
 
 /* ---------- harmony definitions: offsets in degrees from the base hue ---------- */
 // `mono:true` => same hue, different lightness instead of hue offsets.
@@ -57,7 +58,8 @@ const titleish = c => /^\d+$/.test(c.name) ? `No. ${c.name}` : c.name;
 const matchesQuery = (c,q) => c.name.toLowerCase().includes(q)
   || (c.collection||'').toLowerCase().includes(q)
   || (c.aka||[]).some(a=>a.toLowerCase().includes(q));
-const akaLine = c => (c.aka&&c.aka.length) ? c.aka.join(' · ') : '';
+// join with ", " (not " · ") so multi-alias values don't collide with tipFor's " · " field separator
+const akaLine = c => (c.aka&&c.aka.length) ? c.aka.join(', ') : '';
 const escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
 const tipFor = c => `${titleish(c)} · ${c.hex}${akaLine(c)?` · aka ${akaLine(c)}`:''}`;
 const artic = w => /^[aeiou]/i.test(w) ? 'An' : 'A';   // a/an by the following word
@@ -121,7 +123,7 @@ function buildPalette(base, harmony){
       ? [[clampL(base.l>50 ? base.l-STEP : base.l+STEP), 'Shade', base.l>50?-1:1]]
       : [[clampL(base.l+STEP),'Lighter',1], [clampL(base.l-STEP),'Deeper',-1]];
     for (const [t,role,dir] of defs){
-      const ax={valueOnly:true, dir, centerHue:base.h, hueLimit:12, centerL:t, Vval:30, rowMax:3, colMax:2, satBin:14};
+      const ax={valueOnly:true, dir, centerHue:base.h, hueLimit:12, centerL:t};
       const pick=pickBest(base, ax, used) || pickBestByL(base, ax, used);
       if (pick){ used.add(pick.hex); slots.push({role, color:pick, best:pick, axis:ax}); }
     }
@@ -131,8 +133,7 @@ function buildPalette(base, harmony){
     const off=harmony.offsets[0], binW=16, colMax=3;
     // dead-zone just past half a column so ONLY the centre column (the base hue) stays empty
     const ax={valueOnly:false, biDir:true, idealOff:off, centerHue:base.h, centerL:base.l,
-              binW, hueLimit:(colMax+0.5)*binW, minBase:binW/2+1,
-              Vval:30, rowMax:2, colMax};
+              binW, hueLimit:(colMax+0.5)*binW, minBase:binW/2+1};
     const pick=pickBest(base, ax, used);
     if (pick){ used.add(pick.hex); slots.push({role:roleName(off), color:pick, best:pick, axis:ax}); }
   } else {
@@ -140,8 +141,7 @@ function buildPalette(base, harmony){
     const colMax=2, binW=tol.h/2;
     harmony.offsets.forEach(off=>{
       const ax={valueOnly:false, centerHue:norm(base.h+off), centerL:base.l,
-                binW, hueLimit:(colMax+0.5)*binW, minBase:tol.minBase||0,
-                Vval:30, rowMax:2, colMax};
+                binW, hueLimit:(colMax+0.5)*binW, minBase:tol.minBase||0};
       const pick=pickBest(base, ax, used);
       if (pick){ used.add(pick.hex); slots.push({role:roleName(off), color:pick, best:pick, axis:ax}); }
     });
@@ -330,7 +330,11 @@ function renderGrid(){
       style="background-color:${c.hex}" data-hex="${c.hex}" data-name="${encodeURIComponent(c.name)}"
       data-tip="${escAttr(tipFor(c))}"></button>`;
   }).join('')
-    + (list.length===0?`<div class="empty-hint">No colours match. Try clearing filters.</div>`:'');
+    + (list.length===0
+        ? (COLORS.length===0
+            ? `<div class="empty-hint">Colour data failed to load — please reload the page.</div>`
+            : `<div class="empty-hint">No colours match. Try clearing filters.</div>`)
+        : '');
   grid.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>{
     const nm=decodeURIComponent(b.dataset.name);
     state.base=COLORS.find(c=>c.hex===b.dataset.hex && c.name===nm);
@@ -355,7 +359,7 @@ function renderResult(){
   const tray=document.getElementById('paletteTray');
   tray.innerHTML=state.palette.map((s,i)=>{
     const c=s.color, e=emo(c);
-    const tags=[e.temp, ...(e.words||[]).slice(0,2), c.muted?'muted':null].filter(Boolean)
+    const tags=[tempOf(c), ...(e.words||[]).slice(0,2), c.muted?'muted':null].filter(Boolean)
       .map(t=>`<span class="tag">${t}</span>`).join('');
     // alternatives that fit this slot's harmony rule, sorted best-first; tap to swap
     const altBlock = s.axis ? `
@@ -387,8 +391,14 @@ function renderResult(){
   tray.querySelectorAll('.alt-grid .swatch').forEach(b=>b.onclick=()=>
     selectAlt(+b.dataset.slot, b.dataset.hex, decodeURIComponent(b.dataset.name)));
   tray.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{
-    try{ await navigator.clipboard.writeText(b.dataset.copy); }catch(e){}
-    const t=b.textContent; b.textContent='Copied ✓'; setTimeout(()=>{b.textContent=t;},1200);
+    const t=b.textContent;
+    try{
+      await navigator.clipboard.writeText(b.dataset.copy);   // may be unavailable on file:// / non-secure contexts
+      b.textContent='Copied ✓';
+    }catch(e){
+      b.textContent='Copy failed';                           // never report success we didn't achieve
+    }
+    setTimeout(()=>{b.textContent=t;},1200);
   });
 }
 function selectAlt(i, hex, name){
@@ -509,27 +519,36 @@ function analyzeWheelSVG(cl, cols){
     s+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${i===cl.baseIndex?7:6}" fill="${c.hex}" stroke="#fff" stroke-width="2"/>`;});
   return s+`</svg>`;
 }
-function renderAnalyzeResult(){
-  const box=document.getElementById('analyzeResult');
-  const cols=analyzeColors();
-  if(cols.length<2){ box.hidden=true; box.innerHTML=''; return; }
-  const cl=classifyScheme(cols), tier=driftTier(cl.avg), base=cols[cl.baseIndex];
+/* shared drift readout for an analysed colour set — used by both the analyse panel and the
+   WHY panel so the verdict tail + per-partner lines stay in lockstep. `bold` toggles the only
+   cosmetic difference between the two surfaces (partner names bolded in the WHY panel). */
+function driftReadout(cl, cols, {bold=false}={}){
+  const tier=driftTier(cl.avg), base=cols[cl.baseIndex];
   const others=cols.filter((_,k)=>k!==cl.baseIndex);
-  const nWord = cols.length===2?'two':'three';
-  const verdict = cl.scheme.id==='mono'
-    ? `they all sit within ${Math.round(cl.max)}° of a single hue — ${tier.note}.`
-    : `${tier.note}, about ${Math.round(cl.avg)}° off the textbook ideal${cols.length===3?`, ${Math.round(cl.max)}° at most`:''}.`;
+  const tail = cl.scheme.id==='mono'
+    ? `all within ${Math.round(cl.max)}° of one hue, ${tier.note}`
+    : `${tier.note}, about ${Math.round(cl.avg)}° off the textbook ideal${cl.scheme.offsets.length>1?`, ${Math.round(cl.max)}° at most`:''}`;
+  const nm = c => bold ? `<strong>${titleish(c)}</strong>` : titleish(c);
   const lines = [`<li><strong>${titleish(base)}</strong> — base hue ${Math.round(base.h)}°</li>`]
     .concat(cl.scheme.offsets.map((off,k)=>{
       const partner=others[cl.perm[k]], actual=norm(partner.h-base.h), drift=Math.round(hueDist(actual, norm(off)));
       const ideal = cl.scheme.id==='mono' ? 'same hue' : `ideal ${Math.round(norm(off))}°`;
-      return `<li>${titleish(partner)} — ${Math.round(actual)}° from base (${ideal}, ${drift}° drift)</li>`;
+      return `<li>${nm(partner)} — ${Math.round(actual)}° from base (${ideal}, ${drift}° drift)</li>`;
     }));
+  return {scheme:cl.scheme.name, tail, lines};
+}
+function renderAnalyzeResult(){
+  const box=document.getElementById('analyzeResult');
+  const cols=analyzeColors();
+  const cl = cols.length<2 ? null : classifyScheme(cols);
+  if(!cl){ box.hidden=true; box.innerHTML=''; return; }
+  const {scheme, tail, lines} = driftReadout(cl, cols);
+  const nWord = cols.length===2?'two':'three';
   box.hidden=false;
   box.innerHTML=`
     <div class="ares-wheel">${analyzeWheelSVG(cl, cols)}</div>
     <div class="ares-text">
-      <p class="ares-verdict">These ${nWord} read as <strong>${cl.scheme.name}</strong> — ${verdict}</p>
+      <p class="ares-verdict">These ${nWord} read as <strong>${scheme}</strong> — ${tail}.</p>
       <ul class="ares-lines">${lines.join('')}</ul>
       <p class="hint" style="margin:0">Driving the preview below. Clear a colour to return to your scheme.</p>
     </div>`;
@@ -558,7 +577,9 @@ const HUE_BANDS = [
   {lo:290, hi:345, moods:['creativity','sensitivity','playfulness']},
 ];
 const NEUTRAL_S = 14;
-const hueBand = h => { h=norm(h); return HUE_BANDS.find(b=>h>=b.lo&&h<b.hi) || HUE_BANDS[5]; };
+// bands tile [0,360), so find() always resolves for a finite hue; the {moods:[]} fallback only
+// fires for a non-finite (NaN) hue — degrade visibly instead of inventing a band's associations.
+const hueBand = h => { h=norm(h); return HUE_BANDS.find(b=>h>=b.lo&&h<b.hi) || {moods:[]}; };
 const isWarmHue = h => { h=norm(h); return h>=290 || h<70; };   // reds→yellows + pinks warm; greens→violets cool
 function tempOf(c){ return c.s<NEUTRAL_S ? 'neutral' : (isWarmHue(c.h) ? 'warm' : 'cool'); }
 
@@ -668,17 +689,12 @@ function renderWhy(){
   // deviation-from-theory readout — same shape as "Analyse your own colours"
   let verdict='', lines=[], blurb='';
   if(analyzeActive()){
-    const ac=analyzeColors(), cl=classifyScheme(ac), tier=driftTier(cl.avg);
-    const base=ac[cl.baseIndex], others=ac.filter((_,k)=>k!==cl.baseIndex);
-    verdict = cl.scheme.id==='mono'
-      ? `Your selection reads as <strong>${cl.scheme.name}</strong> — all within ${Math.round(cl.max)}° of one hue, ${tier.note}.`
-      : `Your selection reads as <strong>${cl.scheme.name}</strong> — ${tier.note}, about ${Math.round(cl.avg)}° off the textbook ideal${ac.length===3?`, ${Math.round(cl.max)}° at most`:''}.`;
-    lines=[`<li><strong>${titleish(base)}</strong> — base hue ${Math.round(base.h)}°</li>`]
-      .concat(cl.scheme.offsets.map((off,k)=>{
-        const partner=others[cl.perm[k]], actual=norm(partner.h-base.h), drift=Math.round(hueDist(actual, norm(off)));
-        const ideal = cl.scheme.id==='mono' ? 'same hue' : `ideal ${Math.round(norm(off))}°`;
-        return `<li><strong>${titleish(partner)}</strong> — ${Math.round(actual)}° from base (${ideal}, ${drift}° drift)</li>`;
-      }));
+    const ac=analyzeColors(), cl=classifyScheme(ac);
+    if(cl){
+      const r=driftReadout(cl, ac, {bold:true});
+      verdict=`Your selection reads as <strong>${r.scheme}</strong> — ${r.tail}.`;
+      lines=r.lines;
+    }
   } else {
     const t=paletteTheory();
     if(t){
@@ -716,7 +732,7 @@ function renderWhy(){
     })()}</div>`;
 }
 
-/* ---------- ratio band with draggable dividers ---------- */
+/* ---------- ratio band: proportion preview driven by the discrete presets ---------- */
 function evenRatios(n){return Array(n).fill(1/n);}
 function renderRatioPresets(){
   const wrap=document.getElementById('ratioPresets');
@@ -774,6 +790,7 @@ function bindGridTips(container){
 }
 
 function init(){
+  if(!document.getElementById('swatchGrid')) return;   // app markup absent (e.g. test harness) — nothing to wire
   document.getElementById('colorCount').textContent=COLORS.length.toLocaleString();
   document.body.appendChild(floatTip);
   bindGridTips(document.getElementById('swatchGrid'));
@@ -797,4 +814,11 @@ function init(){
   if(def){state.base=def; renderGrid(); renderHarmonies(); recompute();}
 }
 document.addEventListener('DOMContentLoaded', init);
+
+// optional test hook: a harness sets window.__LITAVAL_TEST__ = true before loading this file,
+// and receives the pure helpers to assert against. No effect on the production page.
+if (typeof window !== 'undefined' && window.__LITAVAL_TEST__) window.__LITAVAL_TEST__ = {
+  norm, hueDist, clamp, hueBand, isWarmHue, tempOf, roleName, driftTier,
+  classifyScheme, paletteNarrative, qualifies, ratioPresetsFor, RATIO_PRESETS, HUE_BANDS,
+};
 })();
