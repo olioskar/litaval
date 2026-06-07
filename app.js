@@ -540,13 +540,11 @@ function afterAnalyzeChange(){
   renderAnalyze(); renderRatioPresets(); renderRatio(); renderWhy();
 }
 
-/* ---------- mood model: grounded in hue / lightness / saturation, not family labels ----------
-   Hue→association bands follow the conventional warm/cool colour wheel (warm reds/oranges/
-   yellows stimulate; cool greens/blues/purples soothe; muted = tender/understated, bright =
-   bold, pale = soft, deep = dramatic). The arousal/pleasure/weight scalars follow Valdez &
-   Mehrabian (1994) PAD regressions — arousal rises with saturation and falls with brightness,
-   pleasure rises with brightness, weight (dominance) rises as a colour darkens. These are
-   associations — cultural and personal — a starting point, not a rule. */
+/* ---------- pairing narrative: a plain-language read across independent axes ----------
+   Hue and contrast follow the conventional colour wheel; the saturation and lightness effects
+   follow Valdez & Mehrabian (1994) — visual arousal rises with saturation, pleasantness rises
+   with brightness, and a colour reads heavier as it darkens. Every line is phrased as a
+   tendency, not a rule, so the reader is left to decide what the pairing means to them. */
 const HUE_BANDS = [
   {lo:345, hi:360, moods:['passion','warmth','energy']},
   {lo:0,   hi:15,  moods:['passion','warmth','energy']},
@@ -561,69 +559,72 @@ const HUE_BANDS = [
 ];
 const NEUTRAL_S = 14;
 const hueBand = h => { h=norm(h); return HUE_BANDS.find(b=>h>=b.lo&&h<b.hi) || HUE_BANDS[5]; };
-const isWarmHue = h => { h=norm(h); return h>=290 || h<70; };          // reds→yellows + pinks warm; greens→violets cool
+const isWarmHue = h => { h=norm(h); return h>=290 || h<70; };   // reds→yellows + pinks warm; greens→violets cool
 function tempOf(c){ return c.s<NEUTRAL_S ? 'neutral' : (isWarmHue(c.h) ? 'warm' : 'cool'); }
-/* Pleasure-Arousal-Dominance scalars (0..1), Valdez & Mehrabian (1994) */
-function padOf(c){
-  const B=c.l/100, S=c.s/100;
-  return {
-    arousal:  clamp((-.31*B + .60*S + .31)/.91,  0, 1),
-    pleasure: clamp(( .69*B + .22*S)/.91,         0, 1),
-    weight:   clamp((-.76*B + .32*S + .76)/1.08,  0, 1),   // dark + saturated reads heavy / grounding
-  };
-}
-/* per-colour mood words from hue, shaded by lightness & saturation */
-function colorMoods(c){
-  let moods;
-  if(c.s<NEUTRAL_S){                                        // neutral: brown (warm) vs grey (cool), by depth
-    if(c.l>=80) moods=['airy','clean','open'];
-    else if(c.l<=25) moods=['elegant','grounded'];
-    else moods = isWarmHue(c.h) ? ['comfort','security','grounding'] : ['composure','modern calm'];
-    return moods;
+
+/* plain-sentence read of the pairing, one line per axis: dominant hue, contrast,
+   saturation, lightness — each a tendency the reader can weigh for themselves. */
+function paletteNarrative(cols, weights){
+  if(cols.length<2) return [];
+  const n=cols.length, many=n>2;
+  const w = (weights && weights.length===n) ? weights : cols.map(()=>1/n);
+  const these = many ? 'These three' : 'These two';
+  const meanS = cols.reduce((a,c,i)=>a+w[i]*c.s,0);
+  const meanL = cols.reduce((a,c,i)=>a+w[i]*c.l,0);
+  const Lspread  = Math.max(...cols.map(c=>c.l)) - Math.min(...cols.map(c=>c.l));
+  const satRange = Math.max(...cols.map(c=>c.s)) - Math.min(...cols.map(c=>c.s));
+  let spread=0;
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++) spread=Math.max(spread, hueDist(cols[i].h, cols[j].h));
+
+  // which colour to describe for hue character, and an honest reason it leads
+  const wSorted=[...w].sort((a,b)=>b-a);
+  const hasDominant = (wSorted[0]-wSorted[1]) >= 0.05;        // a clear largest share — not an even 50/50 or 33/33/33
+  const shareLead = cols[[...cols.keys()].sort((a,b)=>w[b]-w[a])[0]];
+  const coloured = cols.filter(c=>c.s>=NEUTRAL_S);
+
+  const s=[];
+  // 1. hue character of the most prominent colour (by share if one dominates, else by saturation)
+  if(!coloured.length){
+    s.push(`${these} are essentially neutral — quiet and flexible, easy to live with and content to sit back rather than assert a strong colour character.`);
+  } else {
+    const byShare = hasDominant && shareLead.s>=NEUTRAL_S;
+    const pick = byShare ? shareLead : coloured.slice().sort((a,b)=>b.s-a.s)[0];
+    const who = byShare ? 'The colour with the largest share'
+                        : (many ? 'The most saturated colour' : 'The more saturated colour');
+    s.push(`${who} reads ${isWarmHue(pick.h)?'warm':'cool'} and is commonly associated with ${hueBand(pick.h).moods.slice(0,3).join(', ')} — associations that are as much cultural as universal.`);
   }
-  moods = hueBand(c.h).moods.slice(0,2);
-  if(c.l>=75) moods.unshift('soft');                       // pale → gentle
-  else if(c.l<=32) moods.unshift('intimate');              // deep → dramatic / intimate
-  if(c.s>=65 && c.l>20 && c.l<80) moods.unshift('bold');   // vivid → bold
-  else if(c.s<=32) moods.unshift('understated');           // muted → tender / understated
-  return moods;
-}
-const SCHEME_ENERGY = {   // harmony contrast → stimulation (colour-theory convention)
-  complementary:+.12, triadic:+.12, split:+.06,
-  analogous:-.10, analogous2:-.10, analogous3:-.10,
-  mono:-.14, mono2:-.14, mono3:-.14,
-};
-/* blend hue moods + PAD energy + harmony + ratio into two coherent lists */
-function paletteMood(cols, weights, schemeId){
-  if(cols.length<2) return null;
-  const w = (weights && weights.length===cols.length) ? weights : cols.map(()=>1/cols.length);
-  const pads = cols.map(padOf);
-  let A=0,P=0,W=0; pads.forEach((p,i)=>{ A+=w[i]*p.arousal; P+=w[i]*p.pleasure; W+=w[i]*p.weight; });
-  const energyD = SCHEME_ENERGY[schemeId] || 0;
-  const mx = Math.max(...w);
-  const ratioD = mx>=.6 ? -.04 : (mx <= 1/cols.length + 0.02 ? +.04 : 0);   // dominant calms, even adds tension
-  A = clamp(A + energyD + ratioD, 0, 1);
 
-  // dominant colour leads the mood; lightest-weighted is the accent
-  const order=[...cols.keys()].sort((a,b)=>w[b]-w[a]);
-  const lead=cols[order[0]], accent=cols[order[order.length-1]];
+  // 2. contrast (hue relationship)
+  if(spread<14)
+    s.push(`${these} share essentially one hue, so the contrast comes from light versus dark rather than colour — which tends to read as unified, quiet and restful.`);
+  else if(spread<45)
+    s.push(`${these} sit close together on the wheel — low, neighbourly contrast that usually feels calm and cohesive.`);
+  else if(spread<120)
+    s.push(`${these} are a fair step apart on the wheel — moderate contrast that adds interest while staying fairly harmonious.`);
+  else
+    s.push(`${these} sit far apart, close to opposite, on the wheel — high contrast, which tends to feel vivid and energetic and pulls the eye to a focal point.`);
 
-  const energyWord = A>=.6 ? 'energising' : A<=.38 ? 'calming' : 'balanced';
-  const moods=[energyWord];
-  if(P>=.62) moods.push('uplifting');
-  if(W>=.6) moods.push('grounding');
-  colorMoods(lead).forEach(m=>moods.push(m));
-  if(accent!==lead){ const am=colorMoods(accent)[0]; if(am) moods.push(am); }
+  // 3. saturation (Valdez & Mehrabian: arousal rises with saturation)
+  if(satRange>45)
+    s.push(`One colour is far more saturated than the ${many?'others':'other'} — saturation drives visual energy, so the vivid one tends to lead while the softer ${many?'ones settle':'one settles'} around it.`);
+  else if(meanS<32)
+    s.push(`${many?'They are':'Both are'} fairly faded — lower saturation generally reads as calm and understated, easy to be around rather than attention-grabbing.`);
+  else if(meanS>=65)
+    s.push(`${many?'They are':'Both are'} strong, saturated colours — saturation is the main driver of visual arousal, so a pairing like this tends to feel lively and stimulating.`);
+  else
+    s.push(`${many?'They sit':'Both sit'} at a middling saturation — present without shouting for attention.`);
 
-  // supports: derived from the whole-palette arousal/weight, so it never self-contradicts
-  let supports = A>=.6 ? ['social gatherings','creative & active work','lively, sociable spaces']
-              : A<=.38 ? ['rest & unwinding','focus & deep work','quiet, restful spaces']
-              : ['everyday living','conversation & shared time','versatile, easy-going spaces'];
-  if(W>=.62) supports.push('intimate, cocooning rooms');
-  else if(P>=.66) supports.push('open, uplifting rooms');
-  supports.push(energyD>0 ? 'feature & statement walls' : 'calm, cohesive rooms');
+  // 4. lightness (Valdez & Mehrabian: brightness → pleasantness, darkness → weight)
+  if(Lspread>40)
+    s.push(`There's a wide light-to-dark range ${many?'across them':'between them'}, and that difference in lightness is what gives the pairing its legibility and a sense of depth.`);
+  else if(meanL>68)
+    s.push(`Overall the ${many?'set sits':'pair sits'} light — brighter colours tend to feel open, airy and uplifting (brightness is the strongest pull on how pleasant a colour reads).`);
+  else if(meanL<38)
+    s.push(`Overall the ${many?'set sits':'pair sits'} deep and dark — darker colours tend to feel grounded, enclosing and a little dramatic.`);
+  else
+    s.push(`They share a comfortable mid lightness — neither stark nor heavy, which keeps things easy-going.`);
 
-  return { moods:[...new Set(moods)].slice(0,6), supports:[...new Set(supports)].slice(0,5) };
+  return s;
 }
 
 /* how far each generated partner landed from its textbook target — mirrors the
@@ -665,10 +666,9 @@ function renderWhy(){
   const tot=temps.length||1;
 
   // deviation-from-theory readout — same shape as "Analyse your own colours"
-  let verdict='', lines=[], blurb='', schemeId=state.harmony.id;
+  let verdict='', lines=[], blurb='';
   if(analyzeActive()){
     const ac=analyzeColors(), cl=classifyScheme(ac), tier=driftTier(cl.avg);
-    schemeId=cl.scheme.id;
     const base=ac[cl.baseIndex], others=ac.filter((_,k)=>k!==cl.baseIndex);
     verdict = cl.scheme.id==='mono'
       ? `Your selection reads as <strong>${cl.scheme.name}</strong> — all within ${Math.round(cl.max)}° of one hue, ${tier.note}.`
@@ -708,12 +708,11 @@ function renderWhy(){
       <p style="margin:12px 0 0">${balanceNote}</p>
     </div>
     <div class="why-cell">${(() => {
-      const m=paletteMood(cols, state.ratios, schemeId);
-      if(!m) return '';
-      return `<p><strong>Associated with:</strong> ${m.moods.join(' · ')}.</p>
-        <p><strong>Supports:</strong> ${m.supports.join(' · ')}.</p>
-        <p class="mood-caveat">Colour associations are cultural and personal — a starting point, not a rule.
-          <span class="src">Grounded in Valdez &amp; Mehrabian (1994).</span></p>`;
+      const lines=paletteNarrative(cols, state.ratios);
+      if(!lines.length) return '';
+      return lines.map(t=>`<p>${t}</p>`).join('') +
+        `<p class="mood-caveat">These are tendencies, not rules — colour feeling is personal and cultural, so trust how the pairing actually reads to you.
+          <span class="src">Saturation &amp; lightness effects after Valdez &amp; Mehrabian (1994).</span></p>`;
     })()}</div>`;
 }
 
