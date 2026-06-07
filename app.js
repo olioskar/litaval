@@ -203,7 +203,14 @@ function roleName(off){
 
 /* ---------- state ---------- */
 const state = {count:2, harmony:HARMONIES[2][0], base:null, filterFamily:'All', muted:false, search:'',
-               palette:[], ratios:[], activeSlot:1, neutralFam:'All', analyze:[null,null,null]};
+               palette:[], ratios:[], ratioPreset:0, activeSlot:1, neutralFam:'All', analyze:[null,null,null]};
+
+/* proportion presets, count-aware (the mix shapes the mood readout) */
+const RATIO_PRESETS = {
+  2:[{label:'50 · 50', r:[.5,.5]}, {label:'70 · 30', r:[.7,.3]}, {label:'80 · 20', r:[.8,.2]}],
+  3:[{label:'33 · 33 · 33', r:[1/3,1/3,1/3]}, {label:'50 · 25 · 25', r:[.5,.25,.25]}, {label:'60 · 30 · 10', r:[.6,.3,.1]}],
+};
+const ratioPresetsFor = n => RATIO_PRESETS[n] || RATIO_PRESETS[2];
 
 /* ---------- reverse analysis: classify an arbitrary 2–3 colour set ---------- */
 // templates are hue offsets (deg) from a chosen base; the classifier tries each
@@ -336,8 +343,8 @@ function renderGrid(){
 function recompute(){
   if(!state.base){return;}
   state.palette=buildPalette(state.base, state.harmony);
-  state.ratios=evenRatios(previewColors().length);
-  renderResult(); renderWhy(); renderRatio(); renderNeutralPicker(); renderAnalyze();
+  state.ratioPreset=0; state.ratios=ratioPresetsFor(previewColors().length)[0].r.slice();
+  renderResult(); renderWhy(); renderRatioPresets(); renderRatio(); renderNeutralPicker(); renderAnalyze();
   document.getElementById('resultPanel').hidden=false;
   document.getElementById('whySection').hidden=false;
   document.getElementById('ratioSection').hidden=false;
@@ -528,8 +535,95 @@ function renderAnalyzeResult(){
     </div>`;
 }
 function afterAnalyzeChange(){
-  state.ratios=evenRatios(previewColors().length);
-  renderAnalyze(); renderRatio(); renderWhy();
+  const n=previewColors().length;
+  state.ratioPreset=0; state.ratios = n ? ratioPresetsFor(n)[0].r.slice() : [];
+  renderAnalyze(); renderRatioPresets(); renderRatio(); renderWhy();
+}
+
+/* ---------- mood model: grounded in hue / lightness / saturation, not family labels ----------
+   Hue→association bands follow the conventional warm/cool colour wheel (warm reds/oranges/
+   yellows stimulate; cool greens/blues/purples soothe; muted = tender/understated, bright =
+   bold, pale = soft, deep = dramatic). The arousal/pleasure/weight scalars follow Valdez &
+   Mehrabian (1994) PAD regressions — arousal rises with saturation and falls with brightness,
+   pleasure rises with brightness, weight (dominance) rises as a colour darkens. These are
+   associations — cultural and personal — a starting point, not a rule. */
+const HUE_BANDS = [
+  {lo:345, hi:360, moods:['passion','warmth','energy']},
+  {lo:0,   hi:15,  moods:['passion','warmth','energy']},
+  {lo:15,  hi:45,  moods:['enthusiasm','sociability','warmth']},
+  {lo:45,  hi:68,  moods:['optimism','happiness','communication']},
+  {lo:68,  hi:90,  moods:['freshness','liveliness']},
+  {lo:90,  hi:160, moods:['balance','serenity','renewal']},
+  {lo:160, hi:195, moods:['calm','clarity','refreshment']},
+  {lo:195, hi:255, moods:['calm','focus','trust']},
+  {lo:255, hi:290, moods:['imagination','introspection','luxury']},
+  {lo:290, hi:345, moods:['creativity','sensitivity','playfulness']},
+];
+const NEUTRAL_S = 14;
+const hueBand = h => { h=norm(h); return HUE_BANDS.find(b=>h>=b.lo&&h<b.hi) || HUE_BANDS[5]; };
+const isWarmHue = h => { h=norm(h); return h>=290 || h<70; };          // reds→yellows + pinks warm; greens→violets cool
+function tempOf(c){ return c.s<NEUTRAL_S ? 'neutral' : (isWarmHue(c.h) ? 'warm' : 'cool'); }
+/* Pleasure-Arousal-Dominance scalars (0..1), Valdez & Mehrabian (1994) */
+function padOf(c){
+  const B=c.l/100, S=c.s/100;
+  return {
+    arousal:  clamp((-.31*B + .60*S + .31)/.91,  0, 1),
+    pleasure: clamp(( .69*B + .22*S)/.91,         0, 1),
+    weight:   clamp((-.76*B + .32*S + .76)/1.08,  0, 1),   // dark + saturated reads heavy / grounding
+  };
+}
+/* per-colour mood words from hue, shaded by lightness & saturation */
+function colorMoods(c){
+  let moods;
+  if(c.s<NEUTRAL_S){                                        // neutral: brown (warm) vs grey (cool), by depth
+    if(c.l>=80) moods=['airy','clean','open'];
+    else if(c.l<=25) moods=['elegant','grounded'];
+    else moods = isWarmHue(c.h) ? ['comfort','security','grounding'] : ['composure','modern calm'];
+    return moods;
+  }
+  moods = hueBand(c.h).moods.slice(0,2);
+  if(c.l>=75) moods.unshift('soft');                       // pale → gentle
+  else if(c.l<=32) moods.unshift('intimate');              // deep → dramatic / intimate
+  if(c.s>=65 && c.l>20 && c.l<80) moods.unshift('bold');   // vivid → bold
+  else if(c.s<=32) moods.unshift('understated');           // muted → tender / understated
+  return moods;
+}
+const SCHEME_ENERGY = {   // harmony contrast → stimulation (colour-theory convention)
+  complementary:+.12, triadic:+.12, split:+.06,
+  analogous:-.10, analogous2:-.10, analogous3:-.10,
+  mono:-.14, mono2:-.14, mono3:-.14,
+};
+/* blend hue moods + PAD energy + harmony + ratio into two coherent lists */
+function paletteMood(cols, weights, schemeId){
+  if(cols.length<2) return null;
+  const w = (weights && weights.length===cols.length) ? weights : cols.map(()=>1/cols.length);
+  const pads = cols.map(padOf);
+  let A=0,P=0,W=0; pads.forEach((p,i)=>{ A+=w[i]*p.arousal; P+=w[i]*p.pleasure; W+=w[i]*p.weight; });
+  const energyD = SCHEME_ENERGY[schemeId] || 0;
+  const mx = Math.max(...w);
+  const ratioD = mx>=.6 ? -.04 : (mx <= 1/cols.length + 0.02 ? +.04 : 0);   // dominant calms, even adds tension
+  A = clamp(A + energyD + ratioD, 0, 1);
+
+  // dominant colour leads the mood; lightest-weighted is the accent
+  const order=[...cols.keys()].sort((a,b)=>w[b]-w[a]);
+  const lead=cols[order[0]], accent=cols[order[order.length-1]];
+
+  const energyWord = A>=.6 ? 'energising' : A<=.38 ? 'calming' : 'balanced';
+  const moods=[energyWord];
+  if(P>=.62) moods.push('uplifting');
+  if(W>=.6) moods.push('grounding');
+  colorMoods(lead).forEach(m=>moods.push(m));
+  if(accent!==lead){ const am=colorMoods(accent)[0]; if(am) moods.push(am); }
+
+  // supports: derived from the whole-palette arousal/weight, so it never self-contradicts
+  let supports = A>=.6 ? ['social gatherings','creative & active work','lively, sociable spaces']
+              : A<=.38 ? ['rest & unwinding','focus & deep work','quiet, restful spaces']
+              : ['everyday living','conversation & shared time','versatile, easy-going spaces'];
+  if(W>=.62) supports.push('intimate, cocooning rooms');
+  else if(P>=.66) supports.push('open, uplifting rooms');
+  supports.push(energyD>0 ? 'feature & statement walls' : 'calm, cohesive rooms');
+
+  return { moods:[...new Set(moods)].slice(0,6), supports:[...new Set(supports)].slice(0,5) };
 }
 
 /* how far each generated partner landed from its textbook target — mirrors the
@@ -566,15 +660,15 @@ function paletteTheory(){
 function renderWhy(){
   const p=document.getElementById('whyPanel');
   const cols=previewColors();
-  const temps=cols.map(c=>emo(c).temp);
+  const temps=cols.map(tempOf);                            // warm/cool from hue, not family
   const warm=temps.filter(t=>t==='warm').length, cool=temps.filter(t=>t==='cool').length, neu=temps.filter(t=>t==='neutral').length;
   const tot=temps.length||1;
-  const moodWords=[...new Set(cols.flatMap(c=>emo(c).words))].slice(0,5);
 
   // deviation-from-theory readout — same shape as "Analyse your own colours"
-  let verdict='', lines=[], blurb='';
+  let verdict='', lines=[], blurb='', schemeId=state.harmony.id;
   if(analyzeActive()){
     const ac=analyzeColors(), cl=classifyScheme(ac), tier=driftTier(cl.avg);
+    schemeId=cl.scheme.id;
     const base=ac[cl.baseIndex], others=ac.filter((_,k)=>k!==cl.baseIndex);
     verdict = cl.scheme.id==='mono'
       ? `Your selection reads as <strong>${cl.scheme.name}</strong> — all within ${Math.round(cl.max)}° of one hue, ${tier.note}.`
@@ -613,20 +707,30 @@ function renderWhy(){
       <div class="balance-label"><span>${warm} warm</span><span>${neu} neutral</span><span>${cool} cool</span></div>
       <p style="margin:12px 0 0">${balanceNote}</p>
     </div>
-    <div class="why-cell">
-      <p><strong>Mood:</strong> ${moodWords.join(' · ')||'soft, understated'}.</p>
-      <p style="margin-bottom:0"><strong>Often suits:</strong> ${[...new Set(cols.map(c=>emo(c).rooms))].slice(0,2).join('; ')}.</p>
-    </div>`;
+    <div class="why-cell">${(() => {
+      const m=paletteMood(cols, state.ratios, schemeId);
+      if(!m) return '';
+      return `<p><strong>Associated with:</strong> ${m.moods.join(' · ')}.</p>
+        <p><strong>Supports:</strong> ${m.supports.join(' · ')}.</p>
+        <p class="mood-caveat">Colour associations are cultural and personal — a starting point, not a rule.
+          <span class="src">Grounded in Valdez &amp; Mehrabian (1994).</span></p>`;
+    })()}</div>`;
 }
 
 /* ---------- ratio band with draggable dividers ---------- */
 function evenRatios(n){return Array(n).fill(1/n);}
-function setPreset(p){
-  const n=previewColors().length; if(!n) return;
-  if(p==='even') state.ratios=evenRatios(n);
-  else if(p==='603010') state.ratios = n===2?[0.65,0.35] : n===3?[0.6,0.3,0.1] : evenRatios(n);
-  else if(p==='7030') state.ratios = n===2?[0.7,0.3] : n===3?[0.7,0.2,0.1] : evenRatios(n);
-  renderRatio();
+function renderRatioPresets(){
+  const wrap=document.getElementById('ratioPresets');
+  const presets=ratioPresetsFor(previewColors().length);
+  wrap.innerHTML=presets.map((p,i)=>
+    `<button data-i="${i}" class="${i===state.ratioPreset?'is-active':''}">${p.label}</button>`).join('');
+  wrap.querySelectorAll('button').forEach(b=>b.onclick=()=>setPreset(+b.dataset.i));
+}
+function setPreset(i){
+  const presets=ratioPresetsFor(previewColors().length);
+  const p=presets[i] || presets[0];
+  state.ratioPreset=i; state.ratios=p.r.slice();
+  renderRatioPresets(); renderRatio(); renderWhy();         // the mix shapes the mood readout
 }
 function renderRatio(){
   const band=document.getElementById('ratioBand');
@@ -685,7 +789,6 @@ function init(){
   });
   document.getElementById('search').oninput=e=>{state.search=e.target.value; renderGrid();};
   document.getElementById('mutedOnly').onchange=e=>{state.muted=e.target.checked; renderGrid();};
-  document.querySelectorAll('.ratio-presets button').forEach(b=>b.onclick=()=>setPreset(b.dataset.preset));
 
   renderHarmonies(); renderFamilyChips(); renderGrid(); renderAnalyze();
 

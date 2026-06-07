@@ -191,6 +191,8 @@ a{color:inherit}
 .ares-lines{margin:0 0 12px; padding-left:18px; font-size:13.5px; color:var(--ink-soft)}
 .ares-lines li{margin:2px 0}
 .ares-lines strong{color:var(--ink)}
+.mood-caveat{font-size:12px; font-style:italic; color:var(--ink-soft); margin:14px 0 0}
+.mood-caveat .src{display:block; font-style:normal; font-size:11px; opacity:.8; margin-top:3px}
 
 /* preview-harmony band — contained dark showcase card */
 .ratio-section{background:#16150f; color:#f4f2ea}
@@ -204,6 +206,7 @@ a{color:inherit}
   border-radius:999px; padding:7px 16px; cursor:pointer;
 }
 .ratio-presets button:hover{background:#26241c}
+.ratio-presets button.is-active{background:#f4f2ea; color:#16150f; border-color:#f4f2ea}
 .ratio-band{display:flex; width:100%; height:min(56vh,440px); border-radius:12px; overflow:hidden; position:relative; user-select:none; margin-top:14px}
 .rseg{position:relative; height:100%; display:flex; align-items:flex-end; justify-content:center; overflow:hidden; min-width:0}
 .rseg .rlabel{
