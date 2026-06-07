@@ -328,7 +328,7 @@ function renderGrid(){
     const nm=decodeURIComponent(b.dataset.name);
     state.base=COLORS.find(c=>c.hex===b.dataset.hex && c.name===nm);
     renderGrid(); renderHarmonies(); recompute();
-    document.getElementById('resultPanel').scrollIntoView({behavior:'smooth',block:'start'});
+    document.getElementById('schemePanel').scrollIntoView({behavior:'smooth',block:'start'});
   });
 }
 
@@ -666,6 +666,8 @@ function bindGridTips(container){
     if(sw && to!==sw) floatTip.classList.remove('show');
   });
   container.addEventListener('scroll', ()=>floatTip.classList.remove('show'));
+  // touch/pen have no mouseout — a tap shows the tip but nothing hides it, so dismiss on release
+  container.addEventListener('pointerup', e=>{ if(e.pointerType!=='mouse') floatTip.classList.remove('show'); });
 }
 
 function init(){
