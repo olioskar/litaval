@@ -61,7 +61,11 @@ const matchesQuery = (c,q) => c.name.toLowerCase().includes(q)
 // join with ", " (not " · ") so multi-alias values don't collide with tipFor's " · " field separator
 const akaLine = c => (c.aka&&c.aka.length) ? c.aka.join(', ') : '';
 const escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-const tipFor = c => `${titleish(c)} · ${c.hex}${akaLine(c)?` · aka ${akaLine(c)}`:''}`;
+// a few scraped names are HTML-entity-encoded (e.g. "Milk &amp; Honey"); innerHTML decodes them
+// on the visible name, but the tooltip is plain text — decode here so it isn't doubly-escaped.
+const decodeHTML = (() => { const el = typeof document!=='undefined' ? document.createElement('textarea') : null;
+  return s => { if(!el) return String(s); el.innerHTML=String(s); return el.value; }; })();
+const tipFor = c => decodeHTML(`${titleish(c)} · ${c.hex}${akaLine(c)?` · aka ${akaLine(c)}`:''}`);
 const artic = w => /^[aeiou]/i.test(w) ? 'An' : 'A';   // a/an by the following word
 
 /* hue closeness score for a slot. Normally "closest to the centre hue is best".
@@ -110,19 +114,22 @@ function pickBest(base, ax, used){
   return best;
 }
 
+/* mono lightness targets: relative steps from the base lightness, clamped to a readable range so
+   contrast scales with how light/dark the base is. `dir` keeps each slot on its own side of the
+   base. Pure (no COLORS/state) so it's unit-testable. Returns [targetL, role, dir] tuples. */
+function monoTargets(baseL, steps){
+  const STEP=30, clampL=v=>clamp(v,18,86);
+  return steps===2
+    ? [[clampL(baseL>50 ? baseL-STEP : baseL+STEP), 'Shade', baseL>50?-1:1]]
+    : [[clampL(baseL+STEP),'Lighter',1], [clampL(baseL-STEP),'Deeper',-1]];
+}
+
 /* build the palette for current base + harmony */
 function buildPalette(base, harmony){
   const slots = [{role:'Base', color:base}];
   const used = new Set([base.hex]);
   if (harmony.mono){
-    // shade targets are a relative step from the base lightness (not a fixed extreme),
-    // clamped to a readable range so the contrast scales with how light/dark the base is
-    const STEP=30, clampL=v=>clamp(v,18,86);
-    // dir keeps each slot's tints/shades on its own side of the base lightness
-    const defs = harmony.steps===2
-      ? [[clampL(base.l>50 ? base.l-STEP : base.l+STEP), 'Shade', base.l>50?-1:1]]
-      : [[clampL(base.l+STEP),'Lighter',1], [clampL(base.l-STEP),'Deeper',-1]];
-    for (const [t,role,dir] of defs){
+    for (const [t,role,dir] of monoTargets(base.l, harmony.steps)){
       const ax={valueOnly:true, dir, centerHue:base.h, hueLimit:12, centerL:t};
       const pick=pickBest(base, ax, used) || pickBestByL(base, ax, used);
       if (pick){ used.add(pick.hex); slots.push({role, color:pick, best:pick, axis:ax}); }
@@ -132,8 +139,8 @@ function buildPalette(base, harmony){
     // the -off and +off neighbours symmetrically (centre columns stay empty via minBase).
     const off=harmony.offsets[0], binW=16, colMax=3;
     // dead-zone just past half a column so ONLY the centre column (the base hue) stays empty
-    const ax={valueOnly:false, biDir:true, idealOff:off, centerHue:base.h, centerL:base.l,
-              binW, hueLimit:(colMax+0.5)*binW, minBase:binW/2+1};
+    const ax={valueOnly:false, idealOff:off, centerHue:base.h, centerL:base.l,
+              binW, hueLimit:(colMax+0.5)*binW, minBase:binW/2+1};   // idealOff!=null signals the bidirectional axis
     const pick=pickBest(base, ax, used);
     if (pick){ used.add(pick.hex); slots.push({role:roleName(off), color:pick, best:pick, axis:ax}); }
   } else {
@@ -390,15 +397,19 @@ function renderResult(){
   }).join('');
   tray.querySelectorAll('.alt-grid .swatch').forEach(b=>b.onclick=()=>
     selectAlt(+b.dataset.slot, b.dataset.hex, decodeURIComponent(b.dataset.name)));
-  tray.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{
-    const t=b.textContent;
-    try{
-      await navigator.clipboard.writeText(b.dataset.copy);   // may be unavailable on file:// / non-secure contexts
-      b.textContent='Copied ✓';
-    }catch(e){
-      b.textContent='Copy failed';                           // never report success we didn't achieve
-    }
-    setTimeout(()=>{b.textContent=t;},1200);
+  tray.querySelectorAll('[data-copy]').forEach(b=>{
+    const orig=b.textContent;                                // canonical label, captured once (not a transient one)
+    let timer;
+    b.onclick=async()=>{
+      clearTimeout(timer);                                   // a fast re-click must not clobber the restore
+      try{
+        await navigator.clipboard.writeText(b.dataset.copy); // may be unavailable on file:// / non-secure contexts
+        b.textContent='Copied ✓';
+      }catch(e){
+        b.textContent='Copy failed';                         // never report success we didn't achieve
+      }
+      timer=setTimeout(()=>{b.textContent=orig;},1200);
+    };
   });
 }
 function selectAlt(i, hex, name){
@@ -522,20 +533,19 @@ function analyzeWheelSVG(cl, cols){
   return s+`</svg>`;
 }
 /* shared drift readout for an analysed colour set — used by both the analyse panel and the
-   WHY panel so the verdict tail + per-partner lines stay in lockstep. `bold` toggles the only
-   cosmetic difference between the two surfaces (partner names bolded in the WHY panel). */
-function driftReadout(cl, cols, {bold=false}={}){
+   WHY panel so the verdict tail + per-partner lines stay in lockstep (names bold on every
+   surface, matching the base line and the palette-mode paletteTheory readout). */
+function driftReadout(cl, cols){
   const tier=driftTier(cl.avg), base=cols[cl.baseIndex];
   const others=cols.filter((_,k)=>k!==cl.baseIndex);
   const tail = cl.scheme.id==='mono'
     ? `all within ${Math.round(cl.max)}° of one hue, ${tier.note}`
     : `${tier.note}, about ${Math.round(cl.avg)}° off the textbook ideal${cl.scheme.offsets.length>1?`, ${Math.round(cl.max)}° at most`:''}`;
-  const nm = c => bold ? `<strong>${titleish(c)}</strong>` : titleish(c);
   const lines = [`<li><strong>${titleish(base)}</strong> — base hue ${Math.round(base.h)}°</li>`]
     .concat(cl.scheme.offsets.map((off,k)=>{
       const partner=others[cl.perm[k]], actual=norm(partner.h-base.h), drift=Math.round(hueDist(actual, norm(off)));
       const ideal = cl.scheme.id==='mono' ? 'same hue' : `ideal ${Math.round(norm(off))}°`;
-      return `<li>${nm(partner)} — ${Math.round(actual)}° from base (${ideal}, ${drift}° drift)</li>`;
+      return `<li><strong>${titleish(partner)}</strong> — ${Math.round(actual)}° from base (${ideal}, ${drift}° drift)</li>`;
     }));
   return {scheme:cl.scheme.name, tail, lines};
 }
@@ -693,7 +703,7 @@ function renderWhy(){
   if(analyzeActive()){
     const ac=analyzeColors(), cl=classifyScheme(ac);
     if(cl){
-      const r=driftReadout(cl, ac, {bold:true});
+      const r=driftReadout(cl, ac);
       verdict=`Your selection reads as <strong>${r.scheme}</strong> — ${r.tail}.`;
       lines=r.lines;
     }
@@ -702,7 +712,7 @@ function renderWhy(){
     if(t){
       const tier=driftTier(t.avg); lines=t.lines;
       verdict = t.mono
-        ? `${artic(state.harmony.name)} <strong>${state.harmony.name}</strong> scheme — your tones sit within ${Math.round(t.max)}° of a single hue, ${tier.note}.`
+        ? `${artic(state.harmony.name)} <strong>${state.harmony.name}</strong> scheme — your tones sit within ${Math.round(t.max)}° of one hue, ${tier.note}.`
         : `${artic(state.harmony.name)} <strong>${state.harmony.name}</strong> scheme — these picks land ${tier.note}, about ${Math.round(t.avg)}° off the textbook ideal${t.lines.length>2?`, ${Math.round(t.max)}° at most`:''}.`;
     }
     blurb=state.harmony.why;
@@ -822,5 +832,6 @@ document.addEventListener('DOMContentLoaded', init);
 if (typeof window !== 'undefined' && window.__LITAVAL_TEST__) window.__LITAVAL_TEST__ = {
   norm, hueDist, clamp, hueBand, isWarmHue, tempOf, roleName, driftTier,
   classifyScheme, paletteNarrative, qualifies, ratioPresetsFor, RATIO_PRESETS, HUE_BANDS,
+  driftReadout, monoTargets,
 };
 })();
