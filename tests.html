@@ -27,8 +27,8 @@ asserts the pure helpers. No framework. Open this file via the same server as th
     if (s && s.textContent === 'running…') { s.textContent = 'FAILED: ' + e.message; s.className = 'bad'; }
   });
 </script>
-<script src="colors.js?v=19"></script>
-<script src="app.js?v=19"></script>
+<script src="colors.js?v=21"></script>
+<script src="app.js?v=21"></script>
 <script>
 (() => {
   const T = window.__LITAVAL_TEST__;
@@ -142,6 +142,10 @@ asserts the pure helpers. No framework. Open this file via the same server as th
       const s = T.paletteNarrative([{h:30,s:80,l:50},{h:210,s:40,l:50}], [0.5,0.5]);
       at(/more saturated/.test(s[0]) && !/largest share/.test(s[0]), s[0]);
     });
+    test('narrative names the singled-out colour', () => {
+      const s = T.paletteNarrative([{h:30,s:80,l:50,name:'Sunset'},{h:210,s:40,l:50,name:'Slate'}], [0.5,0.5]);
+      at(/Sunset/.test(s[0]), s[0]);   // the more-saturated colour is named, not "the most saturated colour"
+    });
     test('narrative 70/30 -> "largest share"', () => {
       const s = T.paletteNarrative([{h:30,s:80,l:50},{h:210,s:40,l:50}], [0.7,0.3]);
       at(/largest share/.test(s[0]), s[0]);
@@ -150,9 +154,13 @@ asserts the pure helpers. No framework. Open this file via the same server as th
       const s = T.paletteNarrative([{h:200,s:60,l:50},{h:205,s:60,l:50}], [0.5,0.5]);
       at(/share essentially one hue/.test(s[1]), s[1]);
     });
-    test('narrative saturation: high range -> far more saturated', () => {
-      const s = T.paletteNarrative([{h:30,s:90,l:50},{h:210,s:20,l:50}], [0.5,0.5]);
-      at(/far more saturated/.test(s[2]), s[2]);
+    test('narrative high sat-range (dominant) names the vivid one', () => {
+      const s = T.paletteNarrative([{h:30,s:40,l:50,name:'Ash'},{h:210,s:90,l:50,name:'Cobalt'}], [0.7,0.3]);
+      at(/far more saturated/.test(s[2]) && /Cobalt/.test(s[2]), s[2]);
+    });
+    test('narrative high sat-range (even) avoids re-naming the lead', () => {
+      const s = T.paletteNarrative([{h:30,s:90,l:50,name:'Marigold'},{h:210,s:20,l:50,name:'Mist'}], [0.5,0.5]);
+      at(/much softer/.test(s[2]) && !/Marigold/.test(s[2]), s[2]);   // named once (sentence 1), not twice
     });
     test('narrative lightness: wide range -> light-to-dark', () => {
       const s = T.paletteNarrative([{h:30,s:60,l:85},{h:210,s:60,l:25}], [0.5,0.5]);

@@ -614,17 +614,24 @@ function paletteNarrative(cols, weights){
   const hasDominant = (wSorted[0]-wSorted[1]) >= 0.05;        // a clear largest share — not an even 50/50 or 33/33/33
   const shareLead = cols[[...cols.keys()].sort((a,b)=>w[b]-w[a])[0]];
   const coloured = cols.filter(c=>c.s>=NEUTRAL_S);
+  const mostSat = cols.slice().sort((a,b)=>b.s-a.s)[0];      // named where a single colour is singled out
+  const nm = c => `<strong>${titleish(c)}</strong>`;
+  // the colour the readout leads with: the dominant share if one exists, else the most saturated
+  const byShare = coloured.length>0 && hasDominant && shareLead.s>=NEUTRAL_S;
+  const leadColor = coloured.length ? (byShare ? shareLead : mostSat) : null;
 
   const s=[];
-  // 1. hue character of the most prominent colour (by share if one dominates, else by saturation)
-  if(!coloured.length){
+  // 1. hue character of the leading colour — named, with an honest reason it leads
+  if(!leadColor){
     s.push(`${these} are essentially neutral — quiet and flexible, easy to live with and content to sit back rather than assert a strong colour character.`);
   } else {
-    const byShare = hasDominant && shareLead.s>=NEUTRAL_S;
-    const pick = byShare ? shareLead : coloured.slice().sort((a,b)=>b.s-a.s)[0];
-    const who = byShare ? 'The colour with the largest share'
-                        : (many ? 'The most saturated colour' : 'The more saturated colour');
-    s.push(`${who} reads ${isWarmHue(pick.h)?'warm':'cool'} and is commonly associated with ${hueBand(pick.h).moods.slice(0,3).join(', ')} — associations that are as much cultural as universal.`);
+    const reason = byShare ? `${nm(leadColor)} holds the largest share`
+                           : `${nm(leadColor)} is the ${many?'most':'more'} saturated`;
+    const moods = hueBand(leadColor.h).moods.slice(0,3).join(', ');
+    const t = isWarmHue(leadColor.h) ? 'warm' : 'cool';
+    s.push(moods
+      ? `${reason} and reads ${t}, commonly associated with ${moods} — associations that are as much cultural as universal.`
+      : `${reason} and reads ${t}.`);
   }
 
   // 2. contrast (hue relationship)
@@ -639,7 +646,10 @@ function paletteNarrative(cols, weights){
 
   // 3. saturation (Valdez & Mehrabian: arousal rises with saturation)
   if(satRange>45)
-    s.push(`One colour is far more saturated than the ${many?'others':'other'} — saturation drives visual energy, so the vivid one tends to lead while the softer ${many?'ones settle':'one settles'} around it.`);
+    s.push(leadColor===mostSat
+      // sentence 1 already named this colour — describe the dynamic via the softer colour(s) instead
+      ? `The ${many?'others read':'other reads'} much softer, ${many?'settling back around it':'so it settles back and lets that one lead'}.`
+      : `${nm(mostSat)} is far more saturated than the ${many?'rest':'other'} — stronger colour carries more visual energy, so it tends to lead while the softer ${many?'ones settle':'one settles'} around it.`);
   else if(meanS<32)
     s.push(`${many?'They are':'Both are'} fairly faded — lower saturation generally reads as calm and understated, easy to be around rather than attention-grabbing.`);
   else if(meanS>=65)
