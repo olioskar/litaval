@@ -445,7 +445,9 @@ function renderNeutralFams(){
 function renderNeutralGrid(){
   const grid=document.getElementById('neutralGrid');
   const cur=state.palette[state.activeSlot] && state.palette[state.activeSlot].color;
-  const list=NEUTRALS.filter(c=>state.neutralFam==='All' || c.family===state.neutralFam);
+  // hide colours already placed in other slots — same exclusion the alternatives grid uses
+  const used=new Set(state.palette.filter((_,k)=>k!==state.activeSlot).map(x=>x.color.hex));
+  const list=NEUTRALS.filter(c=>(state.neutralFam==='All' || c.family===state.neutralFam) && !used.has(c.hex));
   grid.innerHTML=list.map(c=>{
     const sel=cur && cur.hex===c.hex && cur.name===c.name ? ' is-sel' : '';
     return `<button class="swatch${sel}" style="background-color:${c.hex}"
